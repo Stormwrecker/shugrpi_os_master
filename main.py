@@ -229,11 +229,12 @@ class WheelUI:
 
         # add thumbnails and wheel-items
         for index, key in enumerate(self.games):
-            self.thumbnails.append(self.games[key]["thumbnail"])
+            temp_thumb = self.games[key]["thumbnail"] if self.games[key]["thumbnail"] != 0 else fail_image
+            self.thumbnails.append(temp_thumb)
             self.item_angle = math.radians(self.angle_increment * index + 90)
             x = int(math.cos(self.item_angle) * self.width) + self.centerx
             y = int(math.sin(self.item_angle) * self.height) + self.centery
-            wheel_item = WheelItem(index, self.games[key]["name"], self.games[key]["thumbnail"], x, y, self.item_angle)
+            wheel_item = WheelItem(index, self.games[key]["name"], temp_thumb, x, y, self.item_angle)
             self.item_group.add(wheel_item)
 
     def update(self):
