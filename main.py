@@ -42,12 +42,13 @@ import pygame
 logger.info("Successfully loaded Pygame-CE")
 
 # import other modules
+import subprocess
 import threading
 import random
 import time
 import json
 import math
-from utils import *
+from socket import gethostbyname, gethostname
 
 # import RPi.GPIO if available
 try:
@@ -67,7 +68,7 @@ except:
 
 # setup window and display sizes
 display_info = pygame.display.Info()
-display_width, display_height = (800, 450)
+display_width, display_height = (800, 480)
 screen_width, screen_height = (display_width, display_height)
 half_display_x = display_width // 2
 half_display_y = display_height // 2
@@ -85,7 +86,8 @@ GRAY = (70, 70, 70)
 DARK_GRAY = (40, 40, 40)
 DARK_BLUE = (28, 89, 152)
 
-# load assets
+
+# handy tools
 def load_asset(kind, path, flag=False):
     """0: image, 1: sound, 2: font, 3: other"""
     try:
@@ -108,7 +110,17 @@ def load_asset(kind, path, flag=False):
         return None
 
 
-# text handling
+internet_connection = False
+def check_internet_status():
+    global internet_connection
+    my_ip = gethostbyname(gethostname())
+    internet_connection = False
+    if my_ip != "127.0.0.1":
+        internet_connection = True
+    return internet_connection
+
+
+# font handling
 font_cache = {}
 all_fonts = []
 default_font = os.path.join(base_path, "fonts/PressStart2P.ttf")
@@ -120,6 +132,7 @@ def get_font(font, size):
     return font_cache[actual_font]
 
 
+# text renderer
 def draw_text(display, text, x, y, color, size, font=default_font, centered=False):
     font = get_font(font, size)
     text_surface = font.render(str(text), False, color)
@@ -237,7 +250,7 @@ class WheelUI:
             wheel_item = WheelItem(index, self.games[key]["name"], temp_thumb, x, y, self.item_angle)
             self.item_group.add(wheel_item)
 
-    def update(self):
+    def update(self, scroll):
         # normalize target index to stay in range
         self.target_index %= self.num_items
 
@@ -262,7 +275,7 @@ class WheelUI:
         self.master_angle %= 360
 
         # update items
-        self.item_group.update(self)
+        self.item_group.update(self, scroll)
 
     def get_bottom_item(self):
         # Find which item is currently closest to bottom position
@@ -284,8 +297,8 @@ class WheelUI:
 
         return closest_item
 
-    def draw(self, display):
-        pygame.draw.ellipse(display, GRAY, pygame.Rect((self.centerx - (self.width * 1.5),
+    def draw(self, display, scroll):
+        pygame.draw.ellipse(display, GRAY, pygame.Rect((self.centerx - (self.width * 1.5) + scroll,
                                                         self.centery - 20, self.width * 3,
                                                         self.height * 2)))
         sorted_sprites = sorted(self.item_group.sprites(), key=lambda x: x.z_depth)
@@ -313,7 +326,7 @@ class WheelItem(pygame.sprite.Sprite):
         self.original_scale = 1
         self.grow = 0
 
-    def update(self, wheel):
+    def update(self, wheel, scroll):
         # get wheel_ui values for positioning
         self.w_width = wheel.width
         self.w_height = wheel.height
@@ -323,7 +336,7 @@ class WheelItem(pygame.sprite.Sprite):
         current_angle = self.base_angle + math.radians(wheel.master_angle)
 
         # center rect based on wheel_ui pos
-        self.rect.midbottom = (int(math.cos(current_angle) * self.w_width) + self.w_centerx,
+        self.rect.midbottom = (int(math.cos(current_angle) * self.w_width) + self.w_centerx + scroll,
                             int(math.sin(current_angle) * self.w_height) + self.w_centery + 40)
 
         self.z_depth = math.sin(current_angle) + 2
@@ -367,6 +380,29 @@ class WheelItem(pygame.sprite.Sprite):
             self.rect = self.image.get_rect(midbottom=self.rect.midbottom)
 
 
+"""Sub-menu for exectuing a game"""
+class SubMenu:
+    def __init__(self, game):
+        self.image = None
+        self.index = 0
+        self.game = game
+        self.x = display_width + 10
+        self.y = half_display_y
+        self.height = display_height - 100
+        self.width = int(self.height * 4 // 3)
+        self.rect = pygame.Rect((self.x, self.y, self.width, self.height))
+        self.options = ["Start Game", "Back"]
+
+    def render(self, display, scroll):
+        self.rect.x = self.x + (scroll * 2)
+        self.rect.centery = half_display_y
+        pygame.draw.rect(display, (50, 50, 50), self.rect)
+        draw_text(display, self.game, self.rect.x + 30, self.rect.top + 30, WHITE, 30)
+        for index, option in enumerate(self.options):
+            color = YELLOW if index == self.index else WHITE
+            draw_text(display, option, self.rect.x + 30, self.rect.centery + (index * 60), color, 20)
+
+
 """Master SHUGR Pi Operating System"""
 class ShugrPiOS:
     def __init__(self, is_shugr_pi):
@@ -385,6 +421,8 @@ class ShugrPiOS:
 
         self.master_phase = 0
         self.sub_phase = 0
+        self.scroll = 0
+        self.target_scroll = self.scroll
 
         self.logo_timer = 120
         self.start_timer = 180
@@ -444,15 +482,21 @@ class ShugrPiOS:
 
         # scan for valid games
         self.games = self.scan_games()
-        for i in range(3):
-            self.games[i] = {"name":random.choice(["Something", "Whatever"]), "thumbnail":self.fail_image}
+
+        # get titles
         self.titles = []
         for game, configs in self.games.items():
             self.titles.append(configs["name"])
+
+        # misc game variables
         self.game_index = 0
+        self.started_game = False
 
         # create wheel UI element
         self.wheel = WheelUI(half_display_x, half_display_y + 60, 175, 55, self.games, self.fail_image)
+
+        # create sub-menu
+        self.sub_menu = SubMenu(self.titles[self.game_index])
 
     def scan_games(self):
         # create master games directory
@@ -464,7 +508,8 @@ class ShugrPiOS:
 
         # default configuration data for displaying games in UI
         DEFAULT_DISPLAY_CONFIG = {"name": "Name Not Available",
-                                  "thumbnail": 0}
+                                  "thumbnail": 0,
+                                  "run_type": ".py"}
 
         # get all valid games
         games = {}
@@ -481,7 +526,7 @@ class ShugrPiOS:
                 logger.info(f"Detected valid game: '{d}'")
 
                 # get config file
-                config_file = os.path.join(PATH, d, "display_config.json")
+                config_file = os.path.join(PATH, d, "game_config.json")
 
                 # if file does not exist, make one
                 if not os.path.exists(config_file):
@@ -556,14 +601,24 @@ class ShugrPiOS:
 
             # main menu
             elif self.master_phase == 1:
+                # update scroll
+                if self.scroll != self.target_scroll:
+                    diff = (self.target_scroll - self.scroll)
+                    if abs(diff) > 1:
+                        self.scroll += diff * 0.15
+                    else:
+                        self.scroll = self.target_scroll
 
                 # draw logo
                 self.bg_logo.update()
                 self.bg_logo.draw(self.display)
 
                 # draw wheel
-                self.wheel.update()
-                self.wheel.draw(self.display)
+                self.wheel.update(self.scroll)
+                self.wheel.draw(self.display, self.scroll)
+
+                # draw submenu
+                self.sub_menu.render(self.display, self.scroll)
 
                 # draw banners
                 self.display.blit(self.banner_top, self.banner_top_rect)
@@ -571,36 +626,124 @@ class ShugrPiOS:
 
                 # draw banner items
                 self.wifi_image = self.wifi_images[self.internet_connection]
-                self.display.blit(self.wifi_image, (screen_width - 70, 0))
+                self.display.blit(self.wifi_image, (display_width - 120, 0))
+                draw_text(self.display, time.strftime("%H:%M"), display_width - 45, self.banner_top_rect.centery, WHITE, 15, centered=True)
+                draw_text(self.display, int(self.clock.get_fps()), display_width - 40, self.banner_top_rect.bottom + 5, WHITE, 13)
 
                 # draw game label
-                draw_text(self.display, self.titles[self.game_index], half_display_x, self.banner_bottom_rect.centery, WHITE, 10, centered=True)
+                if self.sub_phase == 0:
+                    draw_text(self.display, self.titles[self.game_index], half_display_x, self.banner_bottom_rect.centery, WHITE, 10, centered=True)
+
+                # run game
+                if self.started_game:
+                    self.run_game()
+                else:
+                    if self.screen_alpha > 0:
+                        self.screen_alpha -= 20
+                    else:
+                        self.screen_alpha = 0
+
+                # draw black screen
+                self.black_screen.set_alpha(self.screen_alpha)
+                self.display.blit(self.black_screen, (0, 0))
+
+                # draw message
+                if self.screen_alpha >= 255 and self.started_game:
+                    draw_text(self.display, self.screen_text, display_width // 2, display_height // 2, WHITE, 20, centered=True)
 
             # draw screen
-            self.screen.blit(self.display, (0, 0))
+            self.screen.blit(self.display, (screen_width // 2 - display_width // 2, screen_height // 2 - display_height // 2))
             pygame.display.flip()
 
             # events (do NOT draw anything after this chunk)
             for event in pygame.event.get():
+                # shutdown
                 if event.type == pygame.QUIT:
                     self.shutdown()
+
+                # key presses
                 if event.type == pygame.KEYDOWN:
+                    # skip intro
                     if self.master_phase == 0:
                         self.start_timer = 0
                         self.logo_timer = 60
-                    if event.key == pygame.K_LEFT:
-                        self.game_index -= 1
-                        self.game_index %= len(self.games)
-                        self.wheel.target_index = self.game_index
-                    if event.key == pygame.K_RIGHT:
-                        self.game_index += 1
-                        self.game_index %= len(self.games)
-                        self.wheel.target_index = self.game_index
+
+                    # main menu
+                    if self.master_phase == 1:
+                        # select game
+                        if self.sub_phase == 0:
+                            if event.key == pygame.K_LEFT:
+                                self.game_index -= 1
+                                self.game_index %= len(self.games)
+                                self.wheel.target_index = self.game_index
+                            if event.key == pygame.K_RIGHT:
+                                self.game_index += 1
+                                self.game_index %= len(self.games)
+                                self.wheel.target_index = self.game_index
+                        # select option in sub-menu
+                        elif self.sub_phase == 1:
+                            if event.key == pygame.K_LEFT or event.key == pygame.K_UP:
+                                self.sub_menu.index -= 1
+                                self.sub_menu.index %= len(self.sub_menu.options)
+                            if event.key == pygame.K_RIGHT or event.key == pygame.K_DOWN:
+                                self.sub_menu.index += 1
+                                self.sub_menu.index %= len(self.sub_menu.options)
+                        # bring up sub-menu / execute game
+                        if event.key == pygame.K_RETURN:
+                            if self.sub_phase == 0:
+                                self.sub_phase = 1
+                                self.target_scroll = -self.wheel.width
+                                self.sub_menu.index = 0
+                            elif self.sub_phase == 1:
+                                if self.sub_menu.index == 0:
+                                    game_folder = list(self.games.keys())[self.game_index]
+                                    self.execute_game(game_folder)
+                                elif self.sub_menu.index == 1:
+                                    self.sub_phase = 0
+                                    self.target_scroll = 0
+                        # exit out of sub-menu
+                        if event.key == pygame.K_BACKSPACE:
+                            if self.sub_phase == 1:
+                                self.sub_phase = 0
+                                self.target_scroll = 0
+
+                    # shutdown
                     if event.key == pygame.K_ESCAPE:
                         self.shutdown()
 
             # keep clock running
             self.clock.tick(FPS)
+
+    def execute_game(self, game_folder):
+        self.game_path = os.path.abspath(os.path.join(PATH, game_folder))
+        self.main_app = os.path.join(self.game_path, f"main{self.games[game_folder]["run_type"]}")
+        logger.info(f"Started '{self.titles[self.game_index]}' as 'main{self.games[game_folder]["run_type"]}'")
+        self.started_game = True
+
+    def run_game(self):
+        try:
+            # darken screen
+            if self.screen_alpha < 255:
+                self.screen_alpha += 20
+                self.screen_text = "Running Game..."
+            # run the actual game itself
+            else:
+                self.screen_alpha = 255
+                processes = ['python', self.main_app] if self.main_app.endswith(".py") else self.main_app
+                self.proc = subprocess.Popen(processes, cwd=self.game_path)
+                self.proc.communicate()
+                logger.info(f"'{self.titles[self.game_index]}' terminated successfully")
+                self.started_game = False
+                self.sub_phase = 0
+                self.target_scroll = 0
+                self.screen_text = ""
+
+        except Exception as e:
+            logger.error(f"'{self.titles[self.game_index]}' failed to start: {e}")
+            self.started_game = False
+            self.sub_phase = 0
+            self.target_scroll = 0
+            self.screen_text = ""
 
     def shutdown(self):
         logger.info("Shutting down...")
