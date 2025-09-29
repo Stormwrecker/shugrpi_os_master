@@ -386,6 +386,7 @@ class SubMenu:
         self.image = None
         self.index = 0
         self.game = game
+        self.display_game = game
         self.x = display_width + 10
         self.y = half_display_y
         self.height = display_height - 100
@@ -393,11 +394,19 @@ class SubMenu:
         self.rect = pygame.Rect((self.x, self.y, self.width, self.height))
         self.options = ["Start Game", "Back"]
 
-    def render(self, display, scroll):
+    def render(self, display, scroll, game):
+        if game != self.game:
+            self.display_game = game
+            if len(self.display_game.split()) > 2:
+                target_character = self.display_game.find(" ", 9)
+                self.display_game = self.display_game[0:target_character] + "\n" + self.display_game[target_character + 1:]
+            self.game = game
         self.rect.x = self.x + (scroll * 2)
         self.rect.centery = half_display_y
         pygame.draw.rect(display, (50, 50, 50), self.rect)
-        draw_text(display, self.game, self.rect.x + 30, self.rect.top + 30, WHITE, 30)
+        temp_size = 30 if len(self.display_game) <= 10 else 20
+        for index, line in enumerate(self.display_game.splitlines()):
+            draw_text(display, line, self.rect.x + 30, self.rect.top + 30 + ((temp_size + 10) * index), WHITE, temp_size)
         for index, option in enumerate(self.options):
             color = YELLOW if index == self.index else WHITE
             draw_text(display, option, self.rect.x + 30, self.rect.centery + (index * 60), color, 20)
@@ -648,7 +657,7 @@ class ShugrPiOS:
                 self.wheel.draw(self.display, self.scroll)
 
                 # draw submenu
-                self.sub_menu.render(self.display, self.scroll)
+                self.sub_menu.render(self.display, self.scroll, self.titles[self.game_index])
 
                 # draw banners
                 self.display.blit(self.banner_top, self.banner_top_rect)
