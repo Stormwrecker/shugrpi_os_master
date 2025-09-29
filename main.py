@@ -403,6 +403,33 @@ class SubMenu:
             draw_text(display, option, self.rect.x + 30, self.rect.centery + (index * 60), color, 20)
 
 
+"""Error Message object for game-crashes"""
+class ErrorMessage(Entity):
+    def __init__(self, msg):
+        self.msg = msg
+        self.size = 9
+        Entity.__init__(self)
+        self.image = pygame.Surface(((self.size) * len(self.msg), self.size)).convert_alpha()
+        self.image.set_colorkey(BLACK)
+        self.rect = self.image.get_rect()
+        self.rect.topleft = (display_width - self.size - ((self.size) * len(self.msg)), 33)
+        self.alpha = 255
+        self.display_timer = 180
+
+    def update(self, display):
+        self.image.set_alpha(self.alpha)
+        if self.display_timer:
+            self.display_timer -= 1
+        else:
+            if self.alpha > 0:
+                self.alpha -= 5
+            else:
+                self.alpha = 0
+                self.kill()
+        draw_text(self.image, self.msg, 0, 0, WHITE, self.size)
+        display.blit(self.image, self.rect)
+
+
 """Master SHUGR Pi Operating System"""
 class ShugrPiOS:
     def __init__(self, is_shugr_pi):
@@ -497,6 +524,9 @@ class ShugrPiOS:
 
         # create sub-menu
         self.sub_menu = SubMenu(self.titles[self.game_index])
+
+        # error messages
+        self.error_message_group = pygame.sprite.Group()
 
     def scan_games(self):
         # create master games directory
@@ -628,11 +658,15 @@ class ShugrPiOS:
                 self.wifi_image = self.wifi_images[self.internet_connection]
                 self.display.blit(self.wifi_image, (display_width - 120, 0))
                 draw_text(self.display, time.strftime("%H:%M"), display_width - 45, self.banner_top_rect.centery, WHITE, 15, centered=True)
-                draw_text(self.display, int(self.clock.get_fps()), display_width - 40, self.banner_top_rect.bottom + 5, WHITE, 13)
+                if len(self.error_message_group) == 0:
+                    draw_text(self.display, int(self.clock.get_fps()), display_width - 40, self.banner_top_rect.bottom + 5, WHITE, 13)
 
                 # draw game label
                 if self.sub_phase == 0:
                     draw_text(self.display, self.titles[self.game_index], half_display_x, self.banner_bottom_rect.centery, WHITE, 10, centered=True)
+
+                # draw errors
+                self.error_message_group.update(self.display)
 
                 # run game
                 if self.started_game:
@@ -730,9 +764,16 @@ class ShugrPiOS:
             else:
                 self.screen_alpha = 255
                 processes = ['python', self.main_app] if self.main_app.endswith(".py") else self.main_app
-                self.proc = subprocess.Popen(processes, cwd=self.game_path)
-                self.proc.communicate()
-                logger.info(f"'{self.titles[self.game_index]}' terminated successfully")
+                self.proc = subprocess.Popen(processes, stderr=subprocess.PIPE, cwd=self.game_path, text=True)
+                stdout, stderr = self.proc.communicate()
+                if len(stderr.splitlines()) > 1:
+                    temp_msg = f"'{self.titles[self.game_index]}' has crashed due to '{stderr.splitlines()[-1]}'"
+                    temp_msg_alt = f"{self.titles[self.game_index]} has crashed due to '{stderr.splitlines()[-1]}'"
+                    logger.error(temp_msg)
+                    error_message = ErrorMessage(temp_msg_alt)
+                    self.error_message_group.add(error_message)
+                else:
+                    logger.info(f"'{self.titles[self.game_index]}' terminated successfully")
                 self.started_game = False
                 self.sub_phase = 0
                 self.target_scroll = 0
