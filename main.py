@@ -13,13 +13,13 @@ import sys
 
 # the operating system
 master_platform = platform.system().lower()
-is_shugr_pi = True if master_platform == "linux" else False
+master_machine = platform.machine().lower()
+is_shugr_pi = True if master_machine == "aarch64" else False
 
 # set necessary environment variables
 if is_shugr_pi:
-    os.environ["SDL_VIDEODRIVER"] = "kmsdrm"
-    os.environ["SDL_VIDEO_SYNC"] = "1"
-    os.environ["SDL_AUDIODRIVER"] = "alsa"
+    os.environ["DISPLAY"] = ":0"
+    os.environ['AUDIODEV'] = 'hdmi:CARD=vc4hdmi0,DEV=0'
     os.environ["SDL_VIDEO_ALLOW_SCREENSAVER"] = "0"
 os.environ["PYGAME_HIDE_SUPPORT_PROMPT"] = "hide"
 
@@ -60,14 +60,13 @@ except ImportError:
 pygame.init()
 sound_working = True
 try:
-    pygame.mixer.init()
+    pygame.mixer.init(frequency=48000, size=-16, channels=1, buffer=512)
     logger.info("Initialized pygame.mixer")
-except:
+except pygame.error as e:
     sound_working = False
-    logger.error("Initializing pygame.mixer failed; No sound available")
+    logger.error(f"Initializing pygame.mixer failed; No sound available; {e}")
 
 # setup window and display sizes
-display_info = pygame.display.Info()
 display_width, display_height = (800, 480)
 screen_width, screen_height = (display_width, display_height)
 half_display_x = display_width // 2
@@ -360,7 +359,7 @@ class WheelItem(pygame.sprite.Sprite):
             else:
                 size_x = int(self.original_image.get_width() * zoom_factor)
                 size_y = int(self.original_image.get_height() * zoom_factor)
-            self.image = pygame.transform.scale(self.original_image, (size_x, size_y))
+            self.image = pygame.transform.smoothscale(self.original_image, (size_x, size_y))
             self.image.set_colorkey(WHITE)
             self.rect = self.image.get_rect(midbottom=self.rect.midbottom)
 
@@ -380,13 +379,16 @@ class WheelItem(pygame.sprite.Sprite):
             self.rect = self.image.get_rect(midbottom=self.rect.midbottom)
 
 
-"""Sub-menu for exectuing a game"""
+"""Sub-menu for executing a game"""
 class SubMenu:
     def __init__(self, game):
         self.image = None
         self.index = 0
-        self.game = game
         self.display_game = game
+        if len(self.display_game.split()) > 2:
+            target_character = self.display_game.find(" ", 9)
+            self.display_game = self.display_game[0:target_character] + "\n" + self.display_game[target_character + 1:]
+        self.game = game
         self.x = display_width + 10
         self.y = half_display_y
         self.height = display_height - 100
@@ -446,11 +448,16 @@ class ShugrPiOS:
         logger.info(f"Running on ShugrPi: {'yes' if self.is_shugr_pi else 'no'}")
 
         if self.is_shugr_pi:
-            flags = pygame.NOFRAME | pygame.SCALED | pygame.FULLSCREEN
+            flags = pygame.NOFRAME | pygame.FULLSCREEN | pygame.SCALED
         else:
             flags = pygame.NOFRAME
         self.screen = pygame.display.set_mode((screen_width, screen_height), flags)
         self.display = pygame.Surface((display_width, display_height)).convert()
+        self.display_info = pygame.display.Info()
+        if self.is_shugr_pi:
+            logger.info("Video Driver: " + pygame.display.get_driver())
+            logger.info("Hardware acceleration: " + str(self.display_info.hw))
+            logger.info("Video memory: " + str(self.display_info.video_mem))
         logger.info("Initialized display")
 
         self.clock = pygame.time.Clock()
@@ -503,10 +510,14 @@ class ShugrPiOS:
         # create BG logo object
         self.bg_logo = BGLogo(self.big_logo_img)
 
-        # super amazing sound effect (crucial for the Shugr Pi)
+        # super amazing sound effects (crucial for the Shugr Pi)
         self.logo_sfx = load_asset(1, "audio/shugr_pi.wav")
-        self.logo_sfx.set_volume(1)
+        if self.logo_sfx:
+            self.logo_sfx.set_volume(.75)
         self.played_sound = False
+
+        self.menu_swish_fx = load_asset(1, "audio/menu_swish.wav")
+        self.sfx_channel = pygame.mixer.Channel(1)
 
         # create transition 'curtain'
         self.black_screen = pygame.Surface(self.display.get_size()).convert_alpha()
@@ -526,6 +537,7 @@ class ShugrPiOS:
 
         # misc game variables
         self.game_index = 0
+        self.title_index = 0
         self.started_game = False
 
         # create wheel UI element
@@ -620,7 +632,7 @@ class ShugrPiOS:
                         else:
                             self.logo_alpha = 255
                             if not self.played_sound and sound_working:
-                                self.logo_sfx.play()
+                                self.sfx_channel.play(self.logo_sfx)
                                 self.played_sound = True
                 else:
                     if self.logo_timer:
@@ -657,7 +669,9 @@ class ShugrPiOS:
                 self.wheel.draw(self.display, self.scroll)
 
                 # draw submenu
-                self.sub_menu.render(self.display, self.scroll, self.titles[self.game_index])
+                self.title_index = abs(len(self.games) - 1 - self.game_index) + 1
+                self.title_index %= len(self.games)
+                self.sub_menu.render(self.display, self.scroll, self.titles[self.title_index])
 
                 # draw banners
                 self.display.blit(self.banner_top, self.banner_top_rect)
@@ -672,7 +686,7 @@ class ShugrPiOS:
 
                 # draw game label
                 if self.sub_phase == 0:
-                    draw_text(self.display, self.titles[self.game_index], half_display_x, self.banner_bottom_rect.centery, WHITE, 10, centered=True)
+                    draw_text(self.display, self.titles[self.title_index], half_display_x, self.banner_bottom_rect.centery, WHITE, 10, centered=True)
 
                 # draw errors
                 self.error_message_group.update(self.display)
@@ -719,10 +733,14 @@ class ShugrPiOS:
                                 self.game_index -= 1
                                 self.game_index %= len(self.games)
                                 self.wheel.target_index = self.game_index
+                                if sound_working:
+                                    self.sfx_channel.play(self.menu_swish_fx)
                             if event.key == pygame.K_RIGHT:
                                 self.game_index += 1
                                 self.game_index %= len(self.games)
                                 self.wheel.target_index = self.game_index
+                                if sound_working:
+                                    self.sfx_channel.play(self.menu_swish_fx)
                         # select option in sub-menu
                         elif self.sub_phase == 1:
                             if event.key == pygame.K_LEFT or event.key == pygame.K_UP:
@@ -739,7 +757,7 @@ class ShugrPiOS:
                                 self.sub_menu.index = 0
                             elif self.sub_phase == 1:
                                 if self.sub_menu.index == 0:
-                                    game_folder = list(self.games.keys())[self.game_index]
+                                    game_folder = list(self.games.keys())[self.title_index]
                                     self.execute_game(game_folder)
                                 elif self.sub_menu.index == 1:
                                     self.sub_phase = 0
@@ -759,8 +777,8 @@ class ShugrPiOS:
 
     def execute_game(self, game_folder):
         self.game_path = os.path.abspath(os.path.join(PATH, game_folder))
-        self.main_app = os.path.join(self.game_path, f"main{self.games[game_folder]["run_type"]}")
-        logger.info(f"Started '{self.titles[self.game_index]}' as 'main{self.games[game_folder]["run_type"]}'")
+        self.main_app = os.path.join(self.game_path, f"main{self.games[game_folder]['run_type']}")
+        logger.info(f"Started '{self.titles[self.title_index]}' as `main{self.games[game_folder]['run_type']}`")
         self.started_game = True
 
     def run_game(self):
@@ -772,24 +790,34 @@ class ShugrPiOS:
             # run the actual game itself
             else:
                 self.screen_alpha = 255
+
+                env = os.environ.copy()
+                env['DISPLAY'] = ':0'
+
                 processes = ['python', self.main_app] if self.main_app.endswith(".py") else self.main_app
-                self.proc = subprocess.Popen(processes, stderr=subprocess.PIPE, cwd=self.game_path, text=True)
+                self.proc = subprocess.Popen(processes, stderr=subprocess.PIPE, cwd=self.game_path, text=True, env=env)
+
+                # Raise the game window on top
+                if self.is_shugr_pi:
+                    time.sleep(1)
+                    subprocess.run(['wmctrl', '-a', self.titles[self.title_index]])
+
                 stdout, stderr = self.proc.communicate()
                 if len(stderr.splitlines()) > 1:
-                    temp_msg = f"'{self.titles[self.game_index]}' has crashed due to '{stderr.splitlines()[-1]}'"
-                    temp_msg_alt = f"{self.titles[self.game_index]} has crashed due to '{stderr.splitlines()[-1]}'"
+                    temp_msg = f"'{self.titles[self.title_index]}' has crashed due to '{stderr.splitlines()[-1]}'"
+                    temp_msg_alt = f"{self.titles[self.title_index]} has crashed due to '{stderr.splitlines()[-1]}'"
                     logger.error(temp_msg)
                     error_message = ErrorMessage(temp_msg_alt)
                     self.error_message_group.add(error_message)
                 else:
-                    logger.info(f"'{self.titles[self.game_index]}' terminated successfully")
+                    logger.info(f"'{self.titles[self.title_index]}' terminated successfully")
                 self.started_game = False
                 self.sub_phase = 0
                 self.target_scroll = 0
                 self.screen_text = ""
 
         except Exception as e:
-            logger.error(f"'{self.titles[self.game_index]}' failed to start: {e}")
+            logger.error(f"'{self.titles[self.title_index]}' failed to start: {e}")
             self.started_game = False
             self.sub_phase = 0
             self.target_scroll = 0
