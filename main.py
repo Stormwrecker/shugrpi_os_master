@@ -39,7 +39,10 @@ logger = logging.getLogger("ShugrPiOS")
 
 # import pygame-ce
 import pygame
-logger.info("Successfully loaded Pygame-CE")
+if hasattr(pygame, "IS_CE"):
+    logger.info("Successfully loaded pygame-ce")
+else:
+    logger.error("ShugrPi OS requires pygame-ce: got pygame instead")
 
 # import other modules
 import subprocess
@@ -453,6 +456,7 @@ class ShugrPiOS:
             flags = pygame.NOFRAME
         self.screen = pygame.display.set_mode((screen_width, screen_height), flags)
         self.display = pygame.Surface((display_width, display_height)).convert()
+        pygame.display.set_caption("SHUGRPI OS")
         self.display_info = pygame.display.Info()
         if self.is_shugr_pi:
             logger.info("Video Driver: " + pygame.display.get_driver())
@@ -499,6 +503,9 @@ class ShugrPiOS:
         self.wifi_thread = threading.Thread(target=self.update_internet_connection, daemon=True)
         self.wifi_thread.start()
         logger.info(f"Connected to internet (startup): {'yes' if self.internet_connection else 'no'}")
+
+        # battery setup
+        self.battery_image = pygame.transform.scale(load_asset(0, "images/battery.png", True), (30, 30))
 
         # logo image setup
         self.original_logo_img = load_asset(0, "images/logo.png", True)
@@ -549,10 +556,25 @@ class ShugrPiOS:
         # error messages
         self.error_message_group = pygame.sprite.Group()
 
+    def setup_placeholder(self):
+        logger.warning("'games' directory does not exist")
+
+        os.makedirs(os.path.join(PATH, "placeholder"))
+        with open(os.path.join(PATH, "placeholder", "main.py"), "w") as f:
+            f.write('raise Exception("not a real game")')
+            f.close()
+
+        with open(os.path.join(PATH, "placeholder", "game_config.json"), "w") as f:
+            pygame.image.save(load_asset(0, "images/placeholder_thumb.png"), os.path.join(PATH, "placeholder", "thumbnail.png"))
+            f.write('{"name": "Placeholder", "thumbnail": "thumbnail.png", "run_type": ".py", "use_venv": 0}')
+            f.close()
+
+        logger.info("Created 'games' directory")
+
     def scan_games(self):
         # create master games directory
-        if not os.path.exists(os.path.join(base_path, "games")):
-            os.makedirs(os.path.join(base_path, "games"))
+        if not os.path.exists(PATH):
+            self.setup_placeholder()
 
         # get all game directories
         game_dirs = [d for d in os.listdir(PATH) if os.path.isdir(os.path.join(PATH, d))]
@@ -560,7 +582,8 @@ class ShugrPiOS:
         # default configuration data for displaying games in UI
         DEFAULT_DISPLAY_CONFIG = {"name": "Name Not Available",
                                   "thumbnail": 0,
-                                  "run_type": ".py"}
+                                  "run_type": ".py",
+                                  "use_venv": 0}
 
         # get all valid games
         games = {}
@@ -681,6 +704,8 @@ class ShugrPiOS:
                 self.wifi_image = self.wifi_images[self.internet_connection]
                 self.display.blit(self.wifi_image, (display_width - 120, 0))
                 draw_text(self.display, time.strftime("%H:%M"), display_width - 45, self.banner_top_rect.centery, WHITE, 15, centered=True)
+                self.display.blit(self.battery_image, (10, self.banner_top_rect.centery - self.battery_image.get_height() // 2))
+                draw_text(self.display, str(pygame.system.get_power_state().battery_percent) + "%", 70, self.banner_top_rect.centery, WHITE, 12, centered=True)
                 if len(self.error_message_group) == 0:
                     draw_text(self.display, int(self.clock.get_fps()), display_width - 40, self.banner_top_rect.bottom + 5, WHITE, 13)
 
@@ -778,6 +803,18 @@ class ShugrPiOS:
     def execute_game(self, game_folder):
         self.game_path = os.path.abspath(os.path.join(PATH, game_folder))
         self.main_app = os.path.join(self.game_path, f"main{self.games[game_folder]['run_type']}")
+        self.venv = None
+        # check if using a local venv
+        if self.games[game_folder]['use_venv']:
+            possible_venvs = [".venv", "venv"]
+            for possible_venv in possible_venvs:
+                venv = os.path.join(self.game_path, possible_venv)
+                if os.path.exists(venv):
+                    self.venv = os.path.abspath(venv)
+                    logger.info(f"Detected local environment: Using '{venv}'")
+            if self.venv is None:
+                logger.error("No local environment available")
+
         logger.info(f"Started '{self.titles[self.title_index]}' as `main{self.games[game_folder]['run_type']}`")
         self.started_game = True
 
@@ -794,7 +831,13 @@ class ShugrPiOS:
                 env = os.environ.copy()
                 env['DISPLAY'] = ':0'
 
-                processes = ['python', self.main_app] if self.main_app.endswith(".py") else self.main_app
+                if self.venv:
+                    python_exec = os.path.join(self.game_path, ".venv", "Scripts", "python")
+                else:
+                    python_exec = "python"
+
+                processes = [python_exec, self.main_app] if self.main_app.endswith(".py") else self.main_app
+
                 self.proc = subprocess.Popen(processes, stderr=subprocess.PIPE, cwd=self.game_path, text=True, env=env)
 
                 # Raise the game window on top
@@ -803,12 +846,19 @@ class ShugrPiOS:
                     subprocess.run(['wmctrl', '-a', self.titles[self.title_index]])
 
                 stdout, stderr = self.proc.communicate()
+                del self.proc
+
+                ignored_errors = ["libpng warning: iCCP: known incorrect sRGB profile"]
                 if len(stderr.splitlines()) > 1:
-                    temp_msg = f"'{self.titles[self.title_index]}' has crashed due to '{stderr.splitlines()[-1]}'"
-                    temp_msg_alt = f"{self.titles[self.title_index]} has crashed due to '{stderr.splitlines()[-1]}'"
-                    logger.error(temp_msg)
-                    error_message = ErrorMessage(temp_msg_alt)
-                    self.error_message_group.add(error_message)
+                    proc_error = stderr.splitlines()[-1]
+                    if proc_error not in ignored_errors:
+                        temp_msg = f"'{self.titles[self.title_index]}' has crashed due to '{proc_error}'"
+                        temp_msg_alt = f"{self.titles[self.title_index]} has crashed due to '{proc_error}'"
+                        logger.error(temp_msg)
+                        error_message = ErrorMessage(temp_msg_alt)
+                        self.error_message_group.add(error_message)
+                    else:
+                        logger.info(f"'{self.titles[self.title_index]}' terminated successfully")
                 else:
                     logger.info(f"'{self.titles[self.title_index]}' terminated successfully")
                 self.started_game = False
