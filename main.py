@@ -10,6 +10,7 @@ All Rights Reserved
 import os
 import platform
 import sys
+import shutil
 
 # the operating system
 master_platform = platform.system().lower()
@@ -385,7 +386,6 @@ class WheelItem(pygame.sprite.Sprite):
 """Sub-menu for executing a game"""
 class SubMenu:
     def __init__(self, game):
-        self.image = None
         self.index = 0
         self.display_game = game
         if len(self.display_game.split()) > 2:
@@ -415,6 +415,75 @@ class SubMenu:
         for index, option in enumerate(self.options):
             color = YELLOW if index == self.index else WHITE
             draw_text(display, option, self.rect.x + 30, self.rect.centery + (index * 60), color, 20)
+
+
+"""Install-menu for installing game"""
+class InstallMenu:
+    def __init__(self, game):
+        self.game = game
+        self.index = 0
+        self.x = half_display_x
+        self.y = half_display_y
+        self.width = 0
+        self.height = 0
+        self.target_width = 550
+        self.target_height = 250
+        self.rect = pygame.Rect((self.x, self.y, self.width, self.height))
+        self.text_ready = False
+        self.prompt = [f"{self.game} must be", "fully installed to play. Continue?"]
+        self.options = ["Install", "Cancel"]
+        self.opt_x = [0, 0]
+        self.activate = False
+
+    def render(self, display, game, sub_phase):
+        if game != self.game:
+            self.prompt = [f"{game} must be", "fully installed to play. Continue?"]
+            self.game = game
+        if sub_phase == 2:
+            if abs(int(self.target_width - self.width)) >= 1:
+                self.width += (self.target_width - self.width) * .15
+            else:
+                self.width = self.target_width
+            if abs(int(self.target_height - self.height)) >= 1:
+                self.height += (self.target_height - self.height) * .15
+            else:
+                self.height = self.target_height
+        else:
+            if abs(int(0 - self.width)) >= 1:
+                self.width += (0 - self.width) * .15
+            else:
+                self.width = 0
+            if abs(int(0 - self.height)) >= 1:
+                self.height += (0 - self.height) * .15
+            else:
+                self.height = 0
+
+        if self.width == self.target_width and self.height == self.target_height:
+            if not self.text_ready:
+                self.opt_x = [self.rect.left + 120, self.rect.right - 120]
+                self.text_ready = True
+        else:
+            self.text_ready = False
+
+        self.rect = pygame.Rect((self.x, self.y, self.width, self.height))
+        self.rect.center = (self.x, self.y)
+        if self.width > 5 or self.height > 5:
+            pygame.draw.rect(display, (70, 70, 70), (self.rect.x - 4, self.rect.y - 4, self.rect.width + 8, self.rect.height + 8))
+            pygame.draw.rect(display, (50, 50, 50), self.rect)
+        if self.text_ready:
+            if type(self.prompt) == list:
+                for index, line in enumerate(self.prompt):
+                    draw_text(display, line, self.rect.centerx, self.rect.centery - 30 + (index * 30), WHITE, 14, centered=True)
+            else:
+                draw_text(display, self.prompt, self.rect.centerx, self.rect.centery - 15, WHITE, 14, centered=True)
+
+            if not self.activate:
+                if len(self.options) > 1:
+                    for index, option in enumerate(self.options):
+                        color = YELLOW if index == self.index else WHITE
+                        draw_text(display, option, self.opt_x[index], self.rect.bottom - 50, color, 20, centered=True)
+                else:
+                    draw_text(display, "OK", self.rect.centerx, self.rect.bottom - 50, YELLOW, 20, centered=True)
 
 
 """Error Message object for game-crashes"""
@@ -552,6 +621,10 @@ class ShugrPiOS:
 
         # create sub-menu
         self.sub_menu = SubMenu(self.titles[self.game_index])
+
+        # create install-menu
+        self.install_menu = InstallMenu(self.titles[self.title_index])
+        self.install = False
 
         # error messages
         self.error_message_group = pygame.sprite.Group()
@@ -691,10 +764,13 @@ class ShugrPiOS:
                 self.wheel.update(self.scroll)
                 self.wheel.draw(self.display, self.scroll)
 
-                # draw submenu
+                # draw sub-menu
                 self.title_index = abs(len(self.games) - 1 - self.game_index) + 1
                 self.title_index %= len(self.games)
                 self.sub_menu.render(self.display, self.scroll, self.titles[self.title_index])
+
+                # draw install-menu
+                self.install_menu.render(self.display, self.titles[self.title_index], self.sub_phase)
 
                 # draw banners
                 self.display.blit(self.banner_top, self.banner_top_rect)
@@ -715,6 +791,10 @@ class ShugrPiOS:
 
                 # draw errors
                 self.error_message_group.update(self.display)
+
+                # run installation (if applicable)
+                if self.install:
+                    self.run_installation()
 
                 # run game
                 if self.started_game:
@@ -774,7 +854,17 @@ class ShugrPiOS:
                             if event.key == pygame.K_RIGHT or event.key == pygame.K_DOWN:
                                 self.sub_menu.index += 1
                                 self.sub_menu.index %= len(self.sub_menu.options)
-                        # bring up sub-menu / execute game
+                        # select option in install-menu
+                        elif self.sub_phase == 2:
+                            if self.install_menu.text_ready and not self.install:
+                                if event.key == pygame.K_LEFT or event.key == pygame.K_UP:
+                                    self.install_menu.index -= 1
+                                    self.install_menu.index %= len(self.install_menu.options)
+                                if event.key == pygame.K_RIGHT or event.key == pygame.K_DOWN:
+                                    self.install_menu.index += 1
+                                    self.install_menu.index %= len(self.install_menu.options)
+
+                        # bring up sub-menu / execute game / install game
                         if event.key == pygame.K_RETURN:
                             if self.sub_phase == 0:
                                 self.sub_phase = 1
@@ -787,11 +877,24 @@ class ShugrPiOS:
                                 elif self.sub_menu.index == 1:
                                     self.sub_phase = 0
                                     self.target_scroll = 0
-                        # exit out of sub-menu
+                            elif self.sub_phase == 2:
+                                if self.install_menu.text_ready and not self.install:
+                                    if self.install_menu.index == 0:
+                                        if self.install_menu.options[0] == "Install":
+                                            game_folder = list(self.games.keys())[self.title_index]
+                                            self.install_game(game_folder)
+                                        else:
+                                            self.sub_phase = 1
+                                    else:
+                                        self.sub_phase = 1
+
+                        # exit out of sub-menus
                         if event.key == pygame.K_BACKSPACE:
                             if self.sub_phase == 1:
                                 self.sub_phase = 0
                                 self.target_scroll = 0
+                            elif self.sub_phase == 2 and self.install_menu.text_ready and not self.install:
+                                self.sub_phase = 1
 
                     # shutdown
                     if event.key == pygame.K_ESCAPE:
@@ -799,6 +902,64 @@ class ShugrPiOS:
 
             # keep clock running
             self.clock.tick(FPS)
+
+    def install_game(self, game_folder):
+        requirements_path = os.path.join(PATH, game_folder, "requirements.txt")
+        if os.path.exists(requirements_path):
+            self.install_folder = os.path.join(PATH, game_folder)
+            logger.info(f"Attempting '{self.titles[self.title_index]}' installation...")
+            self.install = True
+        else:
+            logger.error("Unable to find installation requirements")
+            error_message = ErrorMessage("ERROR - Unable to find installation requirements")
+            self.error_message_group.add(error_message)
+
+    def run_installation(self):
+        self.install_menu.prompt = f"Installing {self.titles[self.title_index]}..."
+        self.install_menu.activate = True
+        self.install_menu.render(self.display, self.titles[self.title_index], self.sub_phase)
+        self.screen.blit(self.display, (screen_width // 2 - display_width // 2, screen_height // 2 - display_height // 2))
+        pygame.display.flip()
+        self.clock.tick(FPS)
+
+        # create venv
+        subprocess.run(sys.executable + f" -m venv {os.path.join(self.install_folder, ".venv")}", cwd=self.install_folder)
+        logger.info(f"Added venv in {self.install_folder}...")
+
+        # install dependencies
+        venv_pip = os.path.join(self.install_folder, ".venv", "Scripts", "pip3" if self.is_shugr_pi else "pip")
+        proc = subprocess.Popen(venv_pip + " install -r requirements.txt", cwd=self.install_folder, stderr=subprocess.PIPE, text=True)
+        logger.info("Installing dependencies using pip (from local venv)...")
+        stdout, stderr = proc.communicate()
+
+        # catch errors
+        if len(stderr.splitlines()) > 1:
+            proc_error = stderr.splitlines()[-1]
+            self.install_menu.prompt = ["Failed to install", f"{self.titles[self.title_index]}!"]
+            self.install_menu.options = ["OK"]
+            self.install_menu.activate = False
+            logger.error(f"Failed to install '{self.titles[self.title_index]}' | {proc_error}")
+
+            temp_venv = os.path.join(self.install_folder, ".venv")
+
+            if os.path.exists(temp_venv):
+                for filename in os.listdir(temp_venv):
+                    file_path = os.path.join(temp_venv, filename)
+                    try:
+                        if os.path.isfile(file_path) or os.path.islink(file_path):
+                            os.unlink(file_path)
+                        elif os.path.isdir(file_path):
+                            shutil.rmtree(file_path)
+                    except Exception as e:
+                        logger.error("Failed to delete %s: %s" % (file_path, e))
+                os.removedirs(temp_venv)
+                logger.info("Cleaned up faulty installation")
+
+        else:
+            self.install_menu.prompt = f"Installed {self.titles[self.title_index]}!"
+            logger.info(f"Installed {self.titles[self.title_index]}!")
+
+        self.install = False
 
     def execute_game(self, game_folder):
         self.game_path = os.path.abspath(os.path.join(PATH, game_folder))
@@ -813,10 +974,14 @@ class ShugrPiOS:
                     self.venv = os.path.abspath(venv)
                     logger.info(f"Detected local environment: Using '{venv}'")
             if self.venv is None:
-                logger.error("No local environment available")
+                logger.warning(f"'{self.titles[self.title_index]}' is not fully installed")
+                self.sub_phase = 2
+                self.install_menu.options = ["Install", "Cancel"]
+                self.install_menu.index = 0
 
-        logger.info(f"Started '{self.titles[self.title_index]}' as `main{self.games[game_folder]['run_type']}`")
-        self.started_game = True
+        if self.sub_phase != 2:
+            logger.info(f"Started '{self.titles[self.title_index]}' as `main{self.games[game_folder]['run_type']}`")
+            self.started_game = True
 
     def run_game(self):
         try:
