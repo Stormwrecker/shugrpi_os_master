@@ -11,6 +11,7 @@ import os
 import platform
 import sys
 import shutil
+from py_finder import *
 
 # the operating system
 master_platform = platform.system().lower()
@@ -660,7 +661,8 @@ class ShugrPiOS:
         DEFAULT_DISPLAY_CONFIG = {"name": "Name Not Available",
                                   "thumbnail": 0,
                                   "run_type": ".py",
-                                  "use_venv": 0}
+                                  "use_venv": 0,
+                                  "python_version": "3.13"}
 
         # get all valid games
         games = {}
@@ -915,6 +917,7 @@ class ShugrPiOS:
 
     def install_game(self, game_folder):
         requirements_path = os.path.join(PATH, game_folder, "requirements.txt")
+        self.game_folder = game_folder
         if os.path.exists(requirements_path):
             self.install_folder = os.path.join(PATH, game_folder)
             logger.info(f"Attempting '{self.titles[self.title_index]}' installation...")
@@ -932,23 +935,36 @@ class ShugrPiOS:
 
     def run_installation(self):
         # create venv
-        subprocess.run(sys.executable + f" -m venv {os.path.join(self.install_folder, ".venv")}", cwd=self.install_folder)
+        venv_dir = os.path.join(self.install_folder, ".venv")
+        if self.games[self.game_folder].get("python_version"):
+            logger.info(f"'{self.titles[self.title_index]}' requires Python {self.games[self.game_folder]["python_version"]}")
+        game_python = find_python_executable(self.is_shugr_pi, logger, self.games[self.game_folder].get("python_version"))
+        if game_python:
+            venv_proc = subprocess.Popen([game_python, "-m",  "venv", venv_dir], cwd=self.install_folder)
+            venv_proc.communicate()
+        else:
+            venv_proc = subprocess.Popen(["python", "-m",  "venv", venv_dir], cwd=self.install_folder)
+            venv_proc.communicate()
         logger.info(f"Added venv in {self.install_folder}...")
 
         # install dependencies
-        venv_pip = os.path.join(self.install_folder, ".venv", "Scripts", "pip3" if self.is_shugr_pi else "pip")
-        proc = subprocess.Popen(venv_pip + " install -r requirements.txt", cwd=self.install_folder, stderr=subprocess.PIPE, text=True)
+        venv_path = os.path.join(self.install_folder, ".venv", "bin" if self.is_shugr_pi else "Scripts")
+        venv_python = os.path.join(venv_path, "python3" if self.is_shugr_pi else "python.exe")
+        req_path = os.path.join(self.install_folder, "requirements.txt")
+        proc = subprocess.Popen([venv_python, "-m", "pip", "install", "-r", req_path], cwd=self.install_folder, stderr=subprocess.PIPE, text=True)
         logger.info("Installing dependencies using pip (from local venv)...")
+
         self.install_menu.prompt = f"Installing {self.titles[self.title_index]}..."
         self.install_menu.render(self.display, self.titles[self.title_index], self.sub_phase)
         self.install_menu.activate = True
         self.screen.blit(self.display, (screen_width // 2 - display_width // 2, screen_height // 2 - display_height // 2))
         pygame.display.flip()
         self.clock.tick(FPS)
+
         stdout, stderr = proc.communicate()
 
         # catch errors
-        if len(stderr.splitlines()) > 1:
+        if len(stderr.splitlines()) > 1 and proc.returncode != 0:
             proc_error = stderr.splitlines()[-1]
             self.install_menu.prompt = ["Failed to install", f"{self.titles[self.title_index]}!"]
             self.install_menu.options = ["OK"]
@@ -958,20 +974,16 @@ class ShugrPiOS:
             temp_venv = os.path.join(self.install_folder, ".venv")
 
             if os.path.exists(temp_venv):
-                for filename in os.listdir(temp_venv):
-                    file_path = os.path.join(temp_venv, filename)
-                    try:
-                        if os.path.isfile(file_path) or os.path.islink(file_path):
-                            os.unlink(file_path)
-                        elif os.path.isdir(file_path):
-                            shutil.rmtree(file_path)
-                    except Exception as e:
-                        logger.error("Failed to delete %s: %s" % (file_path, e))
-                os.removedirs(temp_venv)
-                logger.info("Cleaned up faulty installation")
+                try:
+                    shutil.rmtree(temp_venv)
+                    logger.info("Cleaned up faulty installation")
+                except Exception as e:
+                    logger.error(f"Failed to clean faulty installation: {e}")
 
         else:
             self.install_menu.prompt = f"Installed {self.titles[self.title_index]}!"
+            self.install_menu.options = ["OK"]
+            self.install_menu.activate = False
             logger.info(f"Installed {self.titles[self.title_index]}!")
 
         self.install = False
