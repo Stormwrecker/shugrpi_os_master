@@ -43,8 +43,10 @@ logger = logging.getLogger("ShugrPiOS")
 import pygame
 if hasattr(pygame, "IS_CE"):
     logger.info("Successfully loaded pygame-ce")
+    is_ce = True
 else:
-    logger.error("ShugrPi OS requires pygame-ce: got pygame instead")
+    logger.warning("ShugrPi OS requires pygame-ce: got pygame instead")
+    is_ce = False
 
 # import other modules
 import subprocess
@@ -531,6 +533,7 @@ class ShugrPiOS:
         self.screen = pygame.display.set_mode((screen_width, screen_height), flags)
         self.display = pygame.Surface((display_width, display_height)).convert()
         pygame.display.set_caption("SHUGRPI OS")
+        pygame.display.set_icon(load_asset(0, "images/icon.png", True))
         self.display_info = pygame.display.Info()
         if self.is_shugr_pi:
             logger.info("Video Driver: " + pygame.display.get_driver())
@@ -786,8 +789,10 @@ class ShugrPiOS:
                 self.wifi_image = self.wifi_images[self.internet_connection]
                 self.display.blit(self.wifi_image, (display_width - 120, 0))
                 draw_text(self.display, time.strftime("%H:%M"), display_width - 45, self.banner_top_rect.centery, WHITE, 15, centered=True)
-                self.display.blit(self.battery_image, (10, self.banner_top_rect.centery - self.battery_image.get_height() // 2))
-                draw_text(self.display, str(pygame.system.get_power_state().battery_percent) + "%", 70, self.banner_top_rect.centery, WHITE, 12, centered=True)
+                if is_ce:
+                    self.display.blit(self.battery_image, (10, self.banner_top_rect.centery - self.battery_image.get_height() // 2))
+                    battery_percent = pygame.system.get_power_state().battery_percent if pygame.system.get_power_state().battery_percent is not None else 100
+                    draw_text(self.display, str(battery_percent) + "%", 70, self.banner_top_rect.centery, WHITE if battery_percent > 25 else (200, 0, 0), 12, centered=True)
                 if len(self.error_message_group) == 0:
                     draw_text(self.display, int(self.clock.get_fps()), display_width - 40, self.banner_top_rect.bottom + 5, WHITE, 13)
 
@@ -918,7 +923,7 @@ class ShugrPiOS:
     def install_game(self, game_folder):
         requirements_path = os.path.join(PATH, game_folder, "requirements.txt")
         self.game_folder = game_folder
-        if os.path.exists(requirements_path):
+        if os.path.exists(requirements_path) and self.internet_connection:
             self.install_folder = os.path.join(PATH, game_folder)
             logger.info(f"Attempting '{self.titles[self.title_index]}' installation...")
             self.install = True
@@ -929,23 +934,28 @@ class ShugrPiOS:
             pygame.display.flip()
             self.clock.tick(FPS)
         else:
-            logger.error("Unable to find installation requirements")
-            self.install_menu.prompt = "Installation unavailable!"
+            if not os.path.exists(requirements_path):
+                self.install_menu.prompt = "Installation unavailable!"
+                logger.error("Unable to find installation requirements")
+            if not self.internet_connection:
+                self.install_menu.prompt = "ShugrPi must be connected to the\n\nInternet when installing games!"
+                logger.error("Unable to install without internet connection")
             self.install_menu.options = ["OK"]
 
     def run_installation(self):
         # create venv
         venv_dir = os.path.join(self.install_folder, ".venv")
         if self.games[self.game_folder].get("python_version"):
-            logger.info(f"'{self.titles[self.title_index]}' requires Python {self.games[self.game_folder]["python_version"]}")
+            logger.info("'{}' requires Python{}".format(self.titles[self.title_index], self.games[self.game_folder]["python_version"]))
         game_python = find_python_executable(self.is_shugr_pi, logger, self.games[self.game_folder].get("python_version"))
         if game_python:
+            logger.info(f"Using Python: {game_python}")
             venv_proc = subprocess.Popen([game_python, "-m",  "venv", venv_dir], cwd=self.install_folder)
             venv_proc.communicate()
         else:
             venv_proc = subprocess.Popen(["python", "-m",  "venv", venv_dir], cwd=self.install_folder)
             venv_proc.communicate()
-        logger.info(f"Added venv in {self.install_folder}...")
+        logger.info(f"Added venv in '{self.install_folder}'...")
 
         # install dependencies
         venv_path = os.path.join(self.install_folder, ".venv", "bin" if self.is_shugr_pi else "Scripts")
@@ -1024,7 +1034,7 @@ class ShugrPiOS:
                 env['DISPLAY'] = ':0'
 
                 if self.venv:
-                    python_exec = os.path.join(self.game_path, ".venv", "Scripts", "python")
+                    python_exec = os.path.join(self.game_path, ".venv", "Scripts" if not self.is_shugr_pi else "bin", "python")
                 else:
                     python_exec = "python"
 
@@ -1069,6 +1079,7 @@ class ShugrPiOS:
         logger.info("Shutting down...")
         self.running = False
         pygame.quit()
+        self.wifi_thread.join()
         logger.info("Shutdown complete!")
         sys.exit()
 
