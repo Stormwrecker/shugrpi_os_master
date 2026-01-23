@@ -10,7 +10,7 @@ All Rights Reserved
 import os
 import platform
 import sys
-import shutil
+from shutil import rmtree
 from py_finder import *
 
 # the operating system
@@ -95,7 +95,8 @@ DARK_BLUE = (28, 89, 152)
 
 # handy tools
 def load_asset(kind, path, flag=False):
-    """0: image, 1: sound, 2: font, 3: other"""
+    global logger
+    """0: image, 1: sound, 2: font, 3: music, 4: other"""
     try:
         # image
         if kind == 0:
@@ -109,10 +110,16 @@ def load_asset(kind, path, flag=False):
         # font
         elif kind == 2:
             return pygame.font.Font(os.path.join(base_path, path), flag if type(flag) == int else 30)
-        # other
+        # music
         elif kind == 3:
+            pygame.mixer.music.load(os.path.join(base_path, path))
+        # other
+        elif kind == 4:
             return os.path.join(base_path, path)
     except:
+        logger.warning(f"unable to locate '{path}'")
+        if kind == 0:
+            return pygame.image.load(os.path.join(base_path, "images", "fail_load.png")).convert()
         return None
 
 
@@ -249,6 +256,8 @@ class WheelUI:
         # add thumbnails and wheel-items
         for index, key in enumerate(self.games):
             temp_thumb = self.games[key]["thumbnail"] if self.games[key]["thumbnail"] != 0 else fail_image
+            if temp_thumb.get_size() != (150, 200):
+                temp_thumb = pygame.transform.scale(temp_thumb, (150, 200))
             self.thumbnails.append(temp_thumb)
             self.item_angle = math.radians(self.angle_increment * index + 90)
             x = int(math.cos(self.item_angle) * self.width) + self.centerx
@@ -256,7 +265,7 @@ class WheelUI:
             wheel_item = WheelItem(index, self.games[key]["name"], temp_thumb, x, y, self.item_angle)
             self.item_group.add(wheel_item)
 
-    def update(self, scroll):
+    def update(self, scroll_x, scroll_y, master_index):
         # normalize target index to stay in range
         self.target_index %= self.num_items
 
@@ -281,7 +290,7 @@ class WheelUI:
         self.master_angle %= 360
 
         # update items
-        self.item_group.update(self, scroll)
+        self.item_group.update(self, scroll_x, scroll_y, master_index)
 
     def get_bottom_item(self):
         # Find which item is currently closest to bottom position
@@ -303,9 +312,9 @@ class WheelUI:
 
         return closest_item
 
-    def draw(self, display, scroll):
-        pygame.draw.ellipse(display, GRAY, pygame.Rect((self.centerx - (self.width * 1.5) + scroll,
-                                                        self.centery - 20, self.width * 3,
+    def draw(self, display, scroll_x, scroll_y):
+        pygame.draw.ellipse(display, GRAY, pygame.Rect((self.centerx - (self.width * 1.5) + scroll_x,
+                                                        self.centery - 20 + scroll_y, self.width * 3,
                                                         self.height * 2)))
         sorted_sprites = sorted(self.item_group.sprites(), key=lambda x: x.z_depth)
         for sprite in [s for s in sorted_sprites if s.z_depth < 2.0]:
@@ -332,7 +341,7 @@ class WheelItem(pygame.sprite.Sprite):
         self.original_scale = 1
         self.grow = 0
 
-    def update(self, wheel, scroll):
+    def update(self, wheel, scroll_x, scroll_y, master_index):
         # get wheel_ui values for positioning
         self.w_width = wheel.width
         self.w_height = wheel.height
@@ -342,14 +351,14 @@ class WheelItem(pygame.sprite.Sprite):
         current_angle = self.base_angle + math.radians(wheel.master_angle)
 
         # center rect based on wheel_ui pos
-        self.rect.midbottom = (int(math.cos(current_angle) * self.w_width) + self.w_centerx + scroll,
-                            int(math.sin(current_angle) * self.w_height) + self.w_centery + 40)
+        self.rect.midbottom = (int(math.cos(current_angle) * self.w_width) + self.w_centerx + scroll_x,
+                            int(math.sin(current_angle) * self.w_height) + self.w_centery + 40 + scroll_y)
 
         self.z_depth = math.sin(current_angle) + 2
 
         # Draw selection frame if this is the selected item
         bottom_item = wheel.get_bottom_item()
-        if bottom_item and self.index == bottom_item.index:
+        if bottom_item and self.index == bottom_item.index and master_index == 1:
             if abs(wheel.master_angle - wheel.target_angle) < 6:
                 self.zoom_in(1.5)
         else:
@@ -545,8 +554,13 @@ class ShugrPiOS:
 
         self.master_phase = 0
         self.sub_phase = 0
-        self.scroll = 0
-        self.target_scroll = self.scroll
+        self.scroll_x = 0
+        self.target_scroll_x = self.scroll_x
+
+        self.master_index = 1
+        self.top_index = 1
+        self.scroll_y = 0
+        self.target_scroll_y = self.scroll_y
 
         self.logo_timer = 120
         self.start_timer = 180
@@ -570,7 +584,7 @@ class ShugrPiOS:
         self.running = True
 
         # wifi image setup
-        self.wifi_images = {True:pygame.transform.scale(load_asset(0, "images/wifi_on.png"), (30, 30)), False:pygame.transform.scale(load_asset(0, "images/wifi_off.png"), (30, 30))}
+        self.wifi_images = {True:pygame.transform.scale(load_asset(0, "images/wifi_on.png"), (25, 25)), False:pygame.transform.scale(load_asset(0, "images/wifi_off.png"), (25, 25))}
         for k, image in self.wifi_images.items():
             image.set_colorkey(BLACK)
 
@@ -583,6 +597,7 @@ class ShugrPiOS:
 
         # battery setup
         self.battery_image = pygame.transform.scale(load_asset(0, "images/battery.png", True), (30, 30))
+        self.battery_image_low = pygame.transform.scale(load_asset(0, "images/battery_low.png", True), (30, 30))
 
         # logo image setup
         self.original_logo_img = load_asset(0, "images/logo.png", True)
@@ -601,7 +616,15 @@ class ShugrPiOS:
         self.played_sound = False
 
         self.menu_swish_fx = load_asset(1, "audio/menu_swish.wav")
+        self.menu_swish_fx.set_volume(.4)
+        self.menu_up_fx = load_asset(1, "audio/menu_up.wav")
+        self.menu_up_fx.set_volume(.2)
+        self.menu_down_fx = load_asset(1, "audio/menu_down.wav")
+        self.menu_down_fx.set_volume(.2)
+        load_asset(3, "audio/shugr_pi_bg.mp3")
+        pygame.mixer.music.set_volume(.2)
         self.sfx_channel = pygame.mixer.Channel(1)
+        self.sfx_channel.set_volume(.7)
 
         # create transition 'curtain'
         self.black_screen = pygame.Surface(self.display.get_size()).convert_alpha()
@@ -636,6 +659,11 @@ class ShugrPiOS:
 
         # error messages
         self.error_message_group = pygame.sprite.Group()
+
+        # top banner items
+        self.selection_items = [pygame.Rect((5, 1, 80, 28)), pygame.Rect((display_width - 123, 1, 32, 28)), pygame.Rect((-10, -10, 1, 1))]
+        self.selection_names = ["24-hour", "Network", "Battery"]
+        self.toggle_clock = False
 
     def setup_placeholder(self):
         logger.warning("'games' directory does not exist")
@@ -752,31 +780,39 @@ class ShugrPiOS:
                         if self.logo_alpha == 0:
                             self.master_phase = 1
                             self.logo_alpha = 0
+                            if sound_working:
+                                pygame.mixer.music.play(-1, fade_ms=3000)
                             logger.info("Finished initializing ShugrPi OS")
                             logger.info("Running main loop")
 
             # main menu
             elif self.master_phase == 1:
                 # update scroll
-                if self.scroll != self.target_scroll:
-                    diff = (self.target_scroll - self.scroll)
+                if self.scroll_x != self.target_scroll_x:
+                    diff = (self.target_scroll_x - self.scroll_x)
                     if abs(diff) > 1:
-                        self.scroll += diff * 0.15
+                        self.scroll_x += diff * 0.15
                     else:
-                        self.scroll = self.target_scroll
+                        self.scroll_x = self.target_scroll_x
+                if self.scroll_y != self.target_scroll_y:
+                    diff2 = (self.target_scroll_y - self.scroll_y)
+                    if abs(diff2) > 1:
+                        self.scroll_y += diff2 * 0.15
+                    else:
+                        self.scroll_y = self.target_scroll_y
 
                 # draw logo
                 self.bg_logo.update()
                 self.bg_logo.draw(self.display)
 
                 # draw wheel
-                self.wheel.update(self.scroll)
-                self.wheel.draw(self.display, self.scroll)
+                self.wheel.update(self.scroll_x, self.scroll_y, self.master_index)
+                self.wheel.draw(self.display, self.scroll_x, self.scroll_y)
 
                 # draw sub-menu
                 self.title_index = abs(len(self.games) - 1 - self.game_index) + 1
                 self.title_index %= len(self.games)
-                self.sub_menu.render(self.display, self.scroll, self.titles[self.title_index])
+                self.sub_menu.render(self.display, self.scroll_x, self.titles[self.title_index])
 
                 # draw install-menu
                 self.install_menu.render(self.display, self.titles[self.title_index], self.sub_phase)
@@ -787,18 +823,26 @@ class ShugrPiOS:
 
                 # draw banner items
                 self.wifi_image = self.wifi_images[self.internet_connection]
-                self.display.blit(self.wifi_image, (display_width - 120, 0))
-                draw_text(self.display, time.strftime("%H:%M"), display_width - 45, self.banner_top_rect.centery, WHITE, 15, centered=True)
+                self.display.blit(self.wifi_image, (display_width - 120, 2))
+                draw_text(self.display, time.strftime("%H:%M") if not self.toggle_clock else time.strftime("%I:%M"), 45, self.banner_top_rect.centery, WHITE, 13, centered=True)
                 if is_ce:
-                    self.display.blit(self.battery_image, (10, self.banner_top_rect.centery - self.battery_image.get_height() // 2))
                     battery_percent = pygame.system.get_power_state().battery_percent if pygame.system.get_power_state().battery_percent is not None else 100
-                    draw_text(self.display, str(battery_percent) + "%", 70, self.banner_top_rect.centery, WHITE if battery_percent > 25 else (200, 0, 0), 12, centered=True)
+                    self.display.blit(self.battery_image if battery_percent > 25 else self.battery_image_low, (display_width - 80, self.banner_top_rect.centery - self.battery_image.get_height() // 2))
+                    draw_text(self.display, str(battery_percent) + "%", display_width - 30, self.banner_top_rect.centery, WHITE if battery_percent > 25 else (204, 0, 0), 12, centered=True)
                 if len(self.error_message_group) == 0:
                     draw_text(self.display, int(self.clock.get_fps()), display_width - 40, self.banner_top_rect.bottom + 5, WHITE, 13)
 
                 # draw game label
                 if self.sub_phase == 0:
                     draw_text(self.display, self.titles[self.title_index], half_display_x, self.banner_bottom_rect.centery, WHITE, 10, centered=True)
+
+                # draw top selection box
+                if self.master_index == 0:
+                    temp_rect = self.selection_items[self.top_index]
+                    temp_name = self.selection_names[self.top_index]
+                    self.selection_names[0] = "24-hour" if not self.toggle_clock else "12-hour"
+                    pygame.draw.rect(self.display, WHITE, temp_rect, 2)
+                    draw_text(self.display, temp_name.lower().capitalize(), temp_rect.centerx, temp_rect.bottom + 10, WHITE, 8, centered=True)
 
                 # draw errors
                 self.error_message_group.update(self.display)
@@ -846,28 +890,44 @@ class ShugrPiOS:
                         # select game
                         if self.sub_phase == 0:
                             if event.key == pygame.K_LEFT:
-                                self.game_index -= 1
-                                self.game_index %= len(self.games)
-                                self.wheel.target_index = self.game_index
-                                if sound_working:
-                                    self.sfx_channel.play(self.menu_swish_fx)
+                                if self.master_index == 1:
+                                    self.game_index -= 1
+                                    self.game_index %= len(self.games)
+                                    self.wheel.target_index = self.game_index
+                                    if sound_working:
+                                        self.sfx_channel.play(self.menu_swish_fx)
+                                elif self.master_index == 0:
+                                    self.top_index = 0
                             if event.key == pygame.K_RIGHT:
-                                self.game_index += 1
-                                self.game_index %= len(self.games)
-                                self.wheel.target_index = self.game_index
-                                if sound_working:
-                                    self.sfx_channel.play(self.menu_swish_fx)
+                                if self.master_index == 1:
+                                    self.game_index += 1
+                                    self.game_index %= len(self.games)
+                                    self.wheel.target_index = self.game_index
+                                    if sound_working:
+                                        self.sfx_channel.play(self.menu_swish_fx)
+                                elif self.master_index == 0:
+                                    self.top_index = 1
+                            if event.key == pygame.K_UP:
+                                if self.master_index == 1:
+                                    self.master_index = 0
+                                    self.top_index = 0
+                                    self.target_scroll_y = 15
+                            if event.key == pygame.K_DOWN:
+                                if self.master_index == 0:
+                                    self.master_index = 1
+                                    self.target_scroll_y = 0
                         # select option in sub-menu
                         elif self.sub_phase == 1:
-                            if event.key == pygame.K_LEFT or event.key == pygame.K_UP:
-                                self.sub_menu.index -= 1
-                                self.sub_menu.index %= len(self.sub_menu.options)
-                            if event.key == pygame.K_RIGHT or event.key == pygame.K_DOWN:
-                                self.sub_menu.index += 1
-                                self.sub_menu.index %= len(self.sub_menu.options)
+                            if self.master_index == 1:
+                                if event.key == pygame.K_LEFT or event.key == pygame.K_UP:
+                                    self.sub_menu.index -= 1
+                                    self.sub_menu.index %= len(self.sub_menu.options)
+                                if event.key == pygame.K_RIGHT or event.key == pygame.K_DOWN:
+                                    self.sub_menu.index += 1
+                                    self.sub_menu.index %= len(self.sub_menu.options)
                         # select option in install-menu
                         elif self.sub_phase == 2:
-                            if self.install_menu.text_ready and not self.install:
+                            if self.install_menu.text_ready and not self.install and self.master_index == 1:
                                 if event.key == pygame.K_LEFT or event.key == pygame.K_UP:
                                     self.install_menu.index -= 1
                                     self.install_menu.index %= len(self.install_menu.options)
@@ -877,41 +937,63 @@ class ShugrPiOS:
 
                         # bring up sub-menu / execute game / install game
                         if event.key == pygame.K_RETURN:
-                            if self.sub_phase == 0:
-                                self.sub_phase = 1
-                                self.target_scroll = -self.wheel.width
-                                self.sub_menu.index = 0
-                            elif self.sub_phase == 1:
-                                if self.sub_menu.index == 0:
-                                    game_folder = list(self.games.keys())[self.title_index]
-                                    self.execute_game(game_folder)
-                                elif self.sub_menu.index == 1:
-                                    self.sub_phase = 0
-                                    self.target_scroll = 0
-                            elif self.sub_phase == 2:
-                                if self.install_menu.text_ready and not self.install:
-                                    if self.install_menu.index == 0:
-                                        if self.install_menu.options[0] == "Install":
-                                            game_folder = list(self.games.keys())[self.title_index]
-                                            self.install_game(game_folder)
+                            if self.master_index == 1:
+                                if self.sub_phase == 0:
+                                    self.sub_phase = 1
+                                    self.target_scroll_x = -self.wheel.width
+                                    self.sub_menu.index = 0
+                                    if sound_working:
+                                        self.sfx_channel.play(self.menu_up_fx)
+                                elif self.sub_phase == 1:
+                                    if self.sub_menu.index == 0:
+                                        game_folder = list(self.games.keys())[self.title_index]
+                                        self.execute_game(game_folder)
+                                        if sound_working:
+                                            self.sfx_channel.play(self.menu_up_fx)
+                                    elif self.sub_menu.index == 1:
+                                        self.sub_phase = 0
+                                        self.target_scroll_x = 0
+                                        if sound_working:
+                                            self.sfx_channel.play(self.menu_down_fx)
+                                elif self.sub_phase == 2:
+                                    if self.install_menu.text_ready and not self.install:
+                                        if self.install_menu.index == 0:
+                                            if self.install_menu.options[0] == "Install":
+                                                game_folder = list(self.games.keys())[self.title_index]
+                                                self.install_game(game_folder)
+                                            else:
+                                                self.sub_phase = 1
+                                                self.install_menu.prompt = self.install_menu.original_prompt
+                                                self.install_menu.activate = False
+                                                if sound_working:
+                                                    self.sfx_channel.play(self.menu_down_fx)
                                         else:
                                             self.sub_phase = 1
                                             self.install_menu.prompt = self.install_menu.original_prompt
                                             self.install_menu.activate = False
-                                    else:
-                                        self.sub_phase = 1
-                                        self.install_menu.prompt = self.install_menu.original_prompt
-                                        self.install_menu.activate = False
+                                            if sound_working:
+                                                self.sfx_channel.play(self.menu_down_fx)
+                            else:
+                                if self.top_index == 0:
+                                    self.toggle_clock = not self.toggle_clock
 
                         # exit out of sub-menus
                         if event.key == pygame.K_BACKSPACE:
-                            if self.sub_phase == 1:
-                                self.sub_phase = 0
-                                self.target_scroll = 0
-                            elif self.sub_phase == 2 and self.install_menu.text_ready and not self.install:
-                                self.sub_phase = 1
-                                self.install_menu.prompt = self.install_menu.original_prompt
-                                self.install_menu.activate = False
+                            if self.master_index == 1:
+                                if self.sub_phase == 1:
+                                    self.sub_phase = 0
+                                    self.target_scroll_x = 0
+                                    if sound_working:
+                                        self.sfx_channel.play(self.menu_down_fx)
+                                elif self.sub_phase == 2 and self.install_menu.text_ready and not self.install:
+                                    if sound_working:
+                                        self.sfx_channel.play(self.menu_down_fx)
+                                    self.sub_phase = 1
+                                    self.install_menu.prompt = self.install_menu.original_prompt
+                                    self.install_menu.activate = False
+                            else:
+                                self.master_index = 1
+                                self.target_scroll_y = 0
 
                     # shutdown
                     if event.key == pygame.K_ESCAPE:
@@ -985,7 +1067,7 @@ class ShugrPiOS:
 
             if os.path.exists(temp_venv):
                 try:
-                    shutil.rmtree(temp_venv)
+                    rmtree(temp_venv)
                     logger.info("Cleaned up faulty installation")
                 except Exception as e:
                     logger.error(f"Failed to clean faulty installation: {e}")
@@ -1028,6 +1110,8 @@ class ShugrPiOS:
                 self.screen_text = "Running Game..."
             # run the actual game itself
             else:
+                if sound_working:
+                    pygame.mixer.music.fadeout(1000)
                 self.screen_alpha = 255
 
                 env = os.environ.copy()
@@ -1042,6 +1126,9 @@ class ShugrPiOS:
 
                 self.proc = subprocess.Popen(processes, stderr=subprocess.PIPE, cwd=self.game_path, text=True, env=env)
 
+                if sound_working:
+                    self.sfx_channel.stop()
+
                 # Raise the game window on top
                 if self.is_shugr_pi:
                     time.sleep(1)
@@ -1052,10 +1139,10 @@ class ShugrPiOS:
 
                 ignored_errors = ["libpng warning: iCCP: known incorrect sRGB profile"]
                 if len(stderr.splitlines()) > 1:
-                    proc_error = stderr.splitlines()[-1]
-                    if proc_error not in ignored_errors:
-                        temp_msg = f"'{self.titles[self.title_index]}' has crashed due to '{proc_error}'"
-                        temp_msg_alt = f"{self.titles[self.title_index]} has crashed due to '{proc_error}'"
+                    proc_error = stderr
+                    if proc_error.splitlines()[-1] not in ignored_errors:
+                        temp_msg = f"'{self.titles[self.title_index]}' has crashed due to the following problem:\n{proc_error}"
+                        temp_msg_alt = f"{self.titles[self.title_index]} has crashed due to '{proc_error.splitlines()[-1]}'"
                         logger.error(temp_msg)
                         error_message = ErrorMessage(temp_msg_alt)
                         self.error_message_group.add(error_message)
@@ -1065,14 +1152,18 @@ class ShugrPiOS:
                     logger.info(f"'{self.titles[self.title_index]}' terminated successfully")
                 self.started_game = False
                 self.sub_phase = 0
-                self.target_scroll = 0
+                self.target_scroll_x = 0
                 self.screen_text = ""
+                if sound_working:
+                    pygame.mixer.music.play(-1, fade_ms=3000)
 
         except Exception as e:
             logger.error(f"'{self.titles[self.title_index]}' failed to start: {e}")
+            if sound_working:
+                pygame.mixer.music.play(-1, fade_ms=3000)
             self.started_game = False
             self.sub_phase = 0
-            self.target_scroll = 0
+            self.target_scroll_x = 0
             self.screen_text = ""
 
     def shutdown(self):
