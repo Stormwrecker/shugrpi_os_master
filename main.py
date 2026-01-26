@@ -26,7 +26,7 @@ if is_shugr_pi:
 os.environ["PYGAME_HIDE_SUPPORT_PROMPT"] = "hide"
 
 # master directory
-base_path = os.path.abspath(".")
+base_path = os.path.dirname(os.path.abspath(__file__))
 PATH = os.path.join(base_path, "games")
 
 # setup logging
@@ -67,7 +67,7 @@ except ImportError:
 pygame.init()
 sound_working = True
 try:
-    pygame.mixer.init(frequency=48000, size=-16, channels=1, buffer=512)
+    pygame.mixer.init(frequency=48000, size=-16, channels=2, buffer=2048)
     logger.info("Initialized pygame.mixer")
 except pygame.error as e:
     sound_working = False
@@ -610,7 +610,7 @@ class ShugrPiOS:
         self.bg_logo = BGLogo(self.big_logo_img)
 
         # super amazing sound effects (crucial for the Shugr Pi)
-        self.logo_sfx = load_asset(1, "audio/shugr_pi.wav")
+        self.logo_sfx = load_asset(1, "audio/shugr_pi_alt.wav")
         if self.logo_sfx:
             self.logo_sfx.set_volume(.75)
         self.played_sound = False
@@ -808,6 +808,9 @@ class ShugrPiOS:
                 # draw wheel
                 self.wheel.update(self.scroll_x, self.scroll_y, self.master_index)
                 self.wheel.draw(self.display, self.scroll_x, self.scroll_y)
+                if self.master_index == 1:
+                    temp_rect = self.wheel.get_bottom_item().rect
+                    pygame.draw.rect(self.display, WHITE, (temp_rect.centerx - int(temp_rect.width // 2), temp_rect.centery - int(temp_rect.height // 2), int(temp_rect.width), int(temp_rect.height)), 3)
 
                 # draw sub-menu
                 self.title_index = abs(len(self.games) - 1 - self.game_index) + 1
@@ -827,7 +830,7 @@ class ShugrPiOS:
                 draw_text(self.display, time.strftime("%H:%M") if not self.toggle_clock else time.strftime("%I:%M"), 45, self.banner_top_rect.centery, WHITE, 13, centered=True)
                 if is_ce:
                     battery_percent = pygame.system.get_power_state().battery_percent if pygame.system.get_power_state().battery_percent is not None else 100
-                    self.display.blit(self.battery_image if battery_percent > 25 else self.battery_image_low, (display_width - 80, self.banner_top_rect.centery - self.battery_image.get_height() // 2))
+                    self.display.blit(self.battery_image if battery_percent > 25 else self.battery_image_low, (display_width - 90, self.banner_top_rect.centery - self.battery_image.get_height() // 2))
                     draw_text(self.display, str(battery_percent) + "%", display_width - 30, self.banner_top_rect.centery, WHITE if battery_percent > 25 else (204, 0, 0), 12, centered=True)
                 if len(self.error_message_group) == 0:
                     draw_text(self.display, int(self.clock.get_fps()), display_width - 40, self.banner_top_rect.bottom + 5, WHITE, 13)
@@ -1128,6 +1131,7 @@ class ShugrPiOS:
 
                 if sound_working:
                     self.sfx_channel.stop()
+                    pygame.mixer.quit()
 
                 # Raise the game window on top
                 if self.is_shugr_pi:
@@ -1155,6 +1159,9 @@ class ShugrPiOS:
                 self.target_scroll_x = 0
                 self.screen_text = ""
                 if sound_working:
+                    pygame.mixer.init(frequency=48000, size=-16, channels=2, buffer=2048)
+                    load_asset(3, "audio/shugr_pi_bg.mp3")
+                    pygame.mixer.music.set_volume(.2)
                     pygame.mixer.music.play(-1, fade_ms=3000)
 
         except Exception as e:
