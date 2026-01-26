@@ -27,6 +27,7 @@ os.environ["PYGAME_HIDE_SUPPORT_PROMPT"] = "hide"
 
 # master directory
 base_path = os.path.dirname(os.path.abspath(__file__))
+os.chdir(base_path)
 PATH = os.path.join(base_path, "games")
 
 # setup logging
@@ -91,6 +92,11 @@ BLUE = (0, 0, 255)
 GRAY = (70, 70, 70)
 DARK_GRAY = (40, 40, 40)
 DARK_BLUE = (28, 89, 152)
+
+# misc variables
+major_scroll = 0
+target_major_scroll = 0
+is_major_scroll = False
 
 
 # handy tools
@@ -502,8 +508,8 @@ class InstallMenu:
                 draw_text(display, "(this may take some time)", self.rect.centerx, self.rect.bottom - 50, WHITE, 10, centered=True)
 
 
-"""Error Message object for game-crashes"""
-class ErrorMessage(Entity):
+"""Notification object"""
+class Notification(Entity):
     def __init__(self, msg):
         self.msg = msg
         self.size = 9
@@ -558,7 +564,7 @@ class ShugrPiOS:
         self.target_scroll_x = self.scroll_x
 
         self.master_index = 1
-        self.top_index = 1
+        self.top_index = 0
         self.scroll_y = 0
         self.target_scroll_y = self.scroll_y
 
@@ -569,16 +575,22 @@ class ShugrPiOS:
         self.fail_image = load_asset(0, "images/fail_load.png")
 
         # top banner setup
-        self.banner_top = pygame.Surface((display_width, 30)).convert()
+        self.banner_top = pygame.Surface((display_width, 60)).convert()
         self.banner_top.fill(GRAY)
         self.banner_top_rect = self.banner_top.get_rect()
-        self.banner_top_rect.midtop = (half_display_x, 0)
+        self.banner_top_rect.midtop = (half_display_x, -30)
 
         # bottom banner setup
         self.banner_bottom = pygame.Surface((display_width, 30)).convert()
         self.banner_bottom.fill(GRAY)
         self.banner_bottom_rect = self.banner_bottom.get_rect()
         self.banner_bottom_rect.midbottom = (half_display_x, display_height)
+
+        # very top banner setup
+        self.banner_topmost = pygame.Surface((display_width, 30)).convert()
+        self.banner_topmost.fill(GRAY)
+        self.banner_topmost_rect = self.banner_topmost.get_rect()
+        self.banner_topmost_rect.midbottom = (half_display_x, -display_height + 30)
 
         # master run variable
         self.running = True
@@ -657,12 +669,12 @@ class ShugrPiOS:
         self.install_menu = InstallMenu(self.titles[self.title_index])
         self.install = False
 
-        # error messages
-        self.error_message_group = pygame.sprite.Group()
+        # notifications
+        self.notification_group = pygame.sprite.Group()
 
         # top banner items
-        self.selection_items = [pygame.Rect((5, 1, 80, 28)), pygame.Rect((display_width - 123, 1, 32, 28)), pygame.Rect((-10, -10, 1, 1))]
-        self.selection_names = ["24-hour", "Network", "Battery"]
+        self.selection_items = [pygame.Rect((5, 1, 80, 28)), pygame.Rect((display_width - 123, 1, 31, 28)), pygame.Rect((display_width - 91, 1, 84, 28))]
+        self.selection_names = ["Clock", "Network", "Battery"]
         self.toggle_clock = False
 
     def setup_placeholder(self):
@@ -745,6 +757,7 @@ class ShugrPiOS:
             logger.error("Failed to update internet status")
 
     def run(self):
+        global major_scroll, target_major_scroll, is_major_scroll
         while self.running:
             # fill screen with dark gray
             self.display.fill(DARK_GRAY)
@@ -800,14 +813,22 @@ class ShugrPiOS:
                         self.scroll_y += diff2 * 0.15
                     else:
                         self.scroll_y = self.target_scroll_y
+                if major_scroll != target_major_scroll:
+                    diff = (target_major_scroll - major_scroll)
+                    if abs(diff) > 1:
+                        major_scroll += diff * 0.1
+                        is_major_scroll = True
+                    else:
+                        major_scroll = target_major_scroll
+                        is_major_scroll = False
 
                 # draw logo
                 self.bg_logo.update()
                 self.bg_logo.draw(self.display)
 
                 # draw wheel
-                self.wheel.update(self.scroll_x, self.scroll_y, self.master_index)
-                self.wheel.draw(self.display, self.scroll_x, self.scroll_y)
+                self.wheel.update(self.scroll_x, self.scroll_y + major_scroll, self.master_index)
+                self.wheel.draw(self.display, self.scroll_x, self.scroll_y + major_scroll)
                 if self.master_index == 1:
                     temp_rect = self.wheel.get_bottom_item().rect
                     pygame.draw.rect(self.display, WHITE, (temp_rect.centerx - int(temp_rect.width // 2), temp_rect.centery - int(temp_rect.height // 2), int(temp_rect.width), int(temp_rect.height)), 3)
@@ -821,34 +842,42 @@ class ShugrPiOS:
                 self.install_menu.render(self.display, self.titles[self.title_index], self.sub_phase)
 
                 # draw banners
-                self.display.blit(self.banner_top, self.banner_top_rect)
-                self.display.blit(self.banner_bottom, self.banner_bottom_rect)
+                self.display.blit(self.banner_top, (self.banner_top_rect.x, self.banner_top_rect.y + major_scroll))
+                self.display.blit(self.banner_bottom, (self.banner_bottom_rect.x, self.banner_bottom_rect.y + major_scroll))
+                self.display.blit(self.banner_topmost, (self.banner_topmost_rect.x, self.banner_topmost_rect.y + major_scroll))
 
                 # draw banner items
                 self.wifi_image = self.wifi_images[self.internet_connection]
-                self.display.blit(self.wifi_image, (display_width - 120, 2))
-                draw_text(self.display, time.strftime("%H:%M") if not self.toggle_clock else time.strftime("%I:%M"), 45, self.banner_top_rect.centery, WHITE, 13, centered=True)
+                self.display.blit(self.wifi_image, (display_width - 120, 2 + major_scroll))
+                draw_text(self.display, time.strftime("%H:%M") if not self.toggle_clock else time.strftime("%I:%M"), 45, self.banner_top_rect.y + int(self.banner_top_rect.height * .75) + major_scroll, WHITE, 13, centered=True)
+
+                # draw battery
                 if is_ce:
                     battery_percent = pygame.system.get_power_state().battery_percent if pygame.system.get_power_state().battery_percent is not None else 100
-                    self.display.blit(self.battery_image if battery_percent > 25 else self.battery_image_low, (display_width - 90, self.banner_top_rect.centery - self.battery_image.get_height() // 2))
-                    draw_text(self.display, str(battery_percent) + "%", display_width - 30, self.banner_top_rect.centery, WHITE if battery_percent > 25 else (204, 0, 0), 12, centered=True)
-                if len(self.error_message_group) == 0:
-                    draw_text(self.display, int(self.clock.get_fps()), display_width - 40, self.banner_top_rect.bottom + 5, WHITE, 13)
+                else:
+                    battery_percent = 100
+                self.display.blit(self.battery_image if battery_percent > 25 else self.battery_image_low,
+                                  (display_width - 90, self.banner_top_rect.y + int(self.banner_top_rect.height * .75) - self.battery_image.get_height() // 2 + major_scroll))
+                draw_text(self.display, str(battery_percent) + "%", display_width - 36 - (6 * len(str(battery_percent) + "%")),
+                          self.banner_top_rect.y + int(self.banner_top_rect.height * .75) - 6 + major_scroll, WHITE if battery_percent > 25 else (204, 0, 0), 12, centered=False)
+
+                # draw framerate
+                if len(self.notification_group) == 0 and self.top_index < 2:
+                    draw_text(self.display, int(self.clock.get_fps()), display_width - 40, self.banner_top_rect.bottom + 5 + major_scroll, WHITE, 13)
 
                 # draw game label
                 if self.sub_phase == 0:
-                    draw_text(self.display, self.titles[self.title_index], half_display_x, self.banner_bottom_rect.centery, WHITE, 10, centered=True)
+                    draw_text(self.display, self.titles[self.title_index], half_display_x, self.banner_bottom_rect.centery + major_scroll, WHITE, 10, centered=True)
 
                 # draw top selection box
-                if self.master_index == 0:
+                if self.master_index == 0 and major_scroll == 0:
                     temp_rect = self.selection_items[self.top_index]
                     temp_name = self.selection_names[self.top_index]
-                    self.selection_names[0] = "24-hour" if not self.toggle_clock else "12-hour"
                     pygame.draw.rect(self.display, WHITE, temp_rect, 2)
                     draw_text(self.display, temp_name.lower().capitalize(), temp_rect.centerx, temp_rect.bottom + 10, WHITE, 8, centered=True)
 
-                # draw errors
-                self.error_message_group.update(self.display)
+                # draw notifications
+                self.notification_group.update(self.display)
 
                 # run installation (if applicable)
                 if self.install:
@@ -869,7 +898,7 @@ class ShugrPiOS:
 
                 # draw message
                 if self.screen_alpha >= 255 and self.started_game:
-                    draw_text(self.display, self.screen_text, display_width // 2, display_height // 2, WHITE, 20, centered=True)
+                    draw_text(self.display, self.screen_text, display_width // 2, display_height // 2 + major_scroll, WHITE, 20, centered=True)
 
             # draw screen
             self.screen.blit(self.display, (screen_width // 2 - display_width // 2, screen_height // 2 - display_height // 2))
@@ -889,36 +918,46 @@ class ShugrPiOS:
                         self.logo_timer = 60
 
                     # main menu
-                    if self.master_phase == 1:
-                        # select game
+                    if self.master_phase == 1 and not is_major_scroll:
+                        # main screen
                         if self.sub_phase == 0:
+
                             if event.key == pygame.K_LEFT:
+                                # select game
                                 if self.master_index == 1:
                                     self.game_index -= 1
                                     self.game_index %= len(self.games)
                                     self.wheel.target_index = self.game_index
                                     if sound_working:
                                         self.sfx_channel.play(self.menu_swish_fx)
+                                # select top banner
                                 elif self.master_index == 0:
-                                    self.top_index = 0
+                                    self.top_index -= 1
+                                    self.top_index %= len(self.selection_names)
+
                             if event.key == pygame.K_RIGHT:
+                                # select game
                                 if self.master_index == 1:
                                     self.game_index += 1
                                     self.game_index %= len(self.games)
                                     self.wheel.target_index = self.game_index
                                     if sound_working:
                                         self.sfx_channel.play(self.menu_swish_fx)
+                                # select top banner
                                 elif self.master_index == 0:
-                                    self.top_index = 1
+                                    self.top_index += 1
+                                    self.top_index %= len(self.selection_names)
+
+                            # toggle between master indices
                             if event.key == pygame.K_UP:
                                 if self.master_index == 1:
                                     self.master_index = 0
-                                    self.top_index = 0
                                     self.target_scroll_y = 15
                             if event.key == pygame.K_DOWN:
                                 if self.master_index == 0:
                                     self.master_index = 1
                                     self.target_scroll_y = 0
+
                         # select option in sub-menu
                         elif self.sub_phase == 1:
                             if self.master_index == 1:
@@ -940,13 +979,16 @@ class ShugrPiOS:
 
                         # bring up sub-menu / execute game / install game
                         if event.key == pygame.K_RETURN:
+                            # select game
                             if self.master_index == 1:
+                                # select game
                                 if self.sub_phase == 0:
                                     self.sub_phase = 1
                                     self.target_scroll_x = -self.wheel.width
                                     self.sub_menu.index = 0
                                     if sound_working:
                                         self.sfx_channel.play(self.menu_up_fx)
+                                # select in sub-menu
                                 elif self.sub_phase == 1:
                                     if self.sub_menu.index == 0:
                                         game_folder = list(self.games.keys())[self.title_index]
@@ -958,6 +1000,7 @@ class ShugrPiOS:
                                         self.target_scroll_x = 0
                                         if sound_working:
                                             self.sfx_channel.play(self.menu_down_fx)
+                                # select in install-menu
                                 elif self.sub_phase == 2:
                                     if self.install_menu.text_ready and not self.install:
                                         if self.install_menu.index == 0:
@@ -976,9 +1019,11 @@ class ShugrPiOS:
                                             self.install_menu.activate = False
                                             if sound_working:
                                                 self.sfx_channel.play(self.menu_down_fx)
-                            else:
-                                if self.top_index == 0:
-                                    self.toggle_clock = not self.toggle_clock
+
+                            # select top banner
+                            elif self.master_index == 0:
+                                self.master_index = 2
+                                target_major_scroll = display_height
 
                         # exit out of sub-menus
                         if event.key == pygame.K_BACKSPACE:
@@ -994,9 +1039,13 @@ class ShugrPiOS:
                                     self.sub_phase = 1
                                     self.install_menu.prompt = self.install_menu.original_prompt
                                     self.install_menu.activate = False
-                            else:
+                            elif self.master_index == 0:
                                 self.master_index = 1
                                 self.target_scroll_y = 0
+                            elif self.master_index == 2:
+                                self.master_index = 0
+                                self.target_scroll_y = 15
+                                target_major_scroll = 0
 
                     # shutdown
                     if event.key == pygame.K_ESCAPE:
@@ -1148,8 +1197,8 @@ class ShugrPiOS:
                         temp_msg = f"'{self.titles[self.title_index]}' has crashed due to the following problem:\n{proc_error}"
                         temp_msg_alt = f"{self.titles[self.title_index]} has crashed due to '{proc_error.splitlines()[-1]}'"
                         logger.error(temp_msg)
-                        error_message = ErrorMessage(temp_msg_alt)
-                        self.error_message_group.add(error_message)
+                        notifications = Notification(temp_msg_alt)
+                        self.notification_group.add(notifications)
                     else:
                         logger.info(f"'{self.titles[self.title_index]}' terminated successfully")
                 else:
