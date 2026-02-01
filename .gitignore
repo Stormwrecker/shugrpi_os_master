@@ -1,5 +1,6 @@
-# Games directory
+# Miscellaneous files
 games/
+.log
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
