@@ -435,10 +435,9 @@ class SubMenu:
             draw_text(display, option, self.rect.x + 30, self.rect.centery + (index * 60), color, 20)
 
 
-"""Install-menu for installing game"""
-class InstallMenu:
-    def __init__(self, game):
-        self.game = game
+"""Popup Dialog object"""
+class PopupDialog:
+    def __init__(self, phase):
         self.index = 0
         self.x = half_display_x
         self.y = half_display_y
@@ -448,18 +447,14 @@ class InstallMenu:
         self.target_height = 250
         self.rect = pygame.Rect((self.x, self.y, self.width, self.height))
         self.text_ready = False
-        self.original_prompt = [f"{self.game} must be", "fully installed to play. Continue?"]
-        self.prompt = self.original_prompt
-        self.options = ["Install", "Cancel"]
+        self.original_prompt = [""]
+        self.options = ["OK", "Cancel"]
         self.opt_x = [0, 0]
         self.activate = False
+        self.phase = phase
 
-    def render(self, display, game, sub_phase):
-        if game != self.game:
-            self.prompt = [f"{game} must be", "fully installed to play. Continue?"]
-            self.game = game
-        self.original_prompt = [f"{self.game} must be", "fully installed to play. Continue?"]
-        if sub_phase == 2:
+    def render_box(self, display, sub_phase):
+        if sub_phase == self.phase:
             if abs(int(self.target_width - self.width)) >= 1:
                 self.width += (self.target_width - self.width) * .15
             else:
@@ -506,6 +501,35 @@ class InstallMenu:
                     draw_text(display, "OK", self.rect.centerx, self.rect.bottom - 50, YELLOW, 20, centered=True)
             else:
                 draw_text(display, "(this may take some time)", self.rect.centerx, self.rect.bottom - 50, WHITE, 10, centered=True)
+
+
+"""Install-menu for installing game"""
+class InstallMenu(PopupDialog):
+    def __init__(self, game):
+        PopupDialog.__init__(self, 2)
+        self.game = game
+        self.original_prompt = [f"{self.game} must be", "fully installed to play. Continue?"]
+        self.prompt = self.original_prompt
+        self.options = ["Install", "Cancel"]
+
+    def render(self, display, game, sub_phase):
+        if game != self.game:
+            self.prompt = [f"{game} must be", "fully installed to play. Continue?"]
+            self.game = game
+        self.original_prompt = [f"{self.game} must be", "fully installed to play. Continue?"]
+        self.render_box(display, sub_phase)
+
+
+"""Update-menu for updating OS"""
+class UpdateMenu(PopupDialog):
+    def __init__(self):
+        PopupDialog.__init__(self, 3)
+        self.original_prompt = ["A new update of the SHUGRPI OS is", "available. Would you like to install?"]
+        self.prompt = self.original_prompt
+        self.options = ["Update", "Later"]
+
+    def render(self, display, sub_phase):
+        self.render_box(display, sub_phase)
 
 
 """Notification object"""
@@ -603,6 +627,7 @@ class ShugrPiOS:
         # wifi connection setup
         self.internet_connection = check_internet_status()
         self.wifi_image = self.wifi_images[self.internet_connection]
+        self.stop_event = threading.Event()
         self.wifi_thread = threading.Thread(target=self.update_internet_connection, daemon=True)
         self.wifi_thread.start()
         logger.info(f"Connected to internet (startup): {'yes' if self.internet_connection else 'no'}")
@@ -677,6 +702,13 @@ class ShugrPiOS:
         self.selection_names = ["Clock", "Network", "Battery"]
         self.toggle_clock = False
 
+        # updates
+        self.update_available = False
+        self.update_os_thread = threading.Thread(target=self.check_for_updates, args=[base_path,], daemon=True)
+        self.update_os_thread.start()
+        self.update_menu = UpdateMenu()
+        self.is_updating = False
+
     def setup_placeholder(self):
         logger.warning("'games' directory does not exist")
 
@@ -699,6 +731,9 @@ class ShugrPiOS:
 
         # get all game directories
         game_dirs = [d for d in os.listdir(PATH) if os.path.isdir(os.path.join(PATH, d))]
+        if len(game_dirs) <= 0:
+            self.setup_placeholder()
+            game_dirs = [d for d in os.listdir(PATH) if os.path.isdir(os.path.join(PATH, d))]
 
         # default configuration data for displaying games in UI
         DEFAULT_DISPLAY_CONFIG = {"name": "Name Not Available",
@@ -748,13 +783,59 @@ class ShugrPiOS:
 
         return games
 
+    def check_for_updates(self, repo_path):
+        try:
+            if self.is_shugr_pi and self.internet_connection:
+                subprocess.run(["git", "fetch"], cwd=repo_path, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+                result = subprocess.run(["git", "rev-list", "--count", "HEAD..@{u}"], cwd=repo_path, capture_output=True, text=True, check=True)
+                if int(result.stdout.strip()) > 0:
+                    self.update_available = True
+                    logger.info("Updates are available")
+                else:
+                    self.update_available = False
+            else:
+                self.update_available = False
+        except Exception as e:
+            self.update_available = False
+            logger.error(f"Failed to detect updates: {e}")
+
+    def run_updates(self, repo_path):
+        try:
+            if self.is_shugr_pi:
+                self.update_menu.prompt = "Fetching updates..."
+                self.update_menu.render(self.display, self.sub_phase)
+                self.options = []
+                logger.info("Pulling origin...")
+                proc = subprocess.run(["git", "pull", "--ff-only"], cwd=repo_path, check=True)
+
+                self.update_menu.prompt = "Finishing up..."
+                self.update_menu.render(self.display, self.sub_phase)
+                # Update dependencies inside OS venv
+                subprocess.run(["bash", "-c", "source .venv/bin/activate && pip install -r requirements.txt"], cwd=repo_path, check=True)
+                logger.info("Re-installing dependencies...")
+
+                self.update_menu.prompt = "Updated! The SHUGRPI will now reboot."
+                self.update_menu.render(self.display, self.sub_phase)
+                self.options = ["OK"]
+                logger.info("Update successful!")
+                self.is_updating = False
+                self.update_available = False
+            else:
+                self.is_updating = False
+                self.update_available = False
+                self.sub_phase = 0
+        except Exception as e:
+            logger.info(f"Update failed: {e}")
+            self.is_updating = False
+            self.update_available = False
+            self.sub_phase = 0
+
     def update_internet_connection(self):
         try:
-            while self.running:
-                time.sleep(3)
+            while not self.stop_event.wait(3):
                 self.internet_connection = check_internet_status()
-        except:
-            logger.error("Failed to update internet status")
+        except Exception as e:
+            logger.error(f"Failed to update internet status: {e}")
 
     def run(self):
         global major_scroll, target_major_scroll, is_major_scroll
@@ -822,6 +903,10 @@ class ShugrPiOS:
                         major_scroll = target_major_scroll
                         is_major_scroll = False
 
+                # bring up menu if updates are available
+                if self.update_available:
+                    self.sub_phase = 3
+
                 # draw logo
                 self.bg_logo.update()
                 self.bg_logo.draw(self.display)
@@ -841,6 +926,9 @@ class ShugrPiOS:
                 # draw install-menu
                 self.install_menu.render(self.display, self.titles[self.title_index], self.sub_phase)
 
+                # draw update-menu
+                self.update_menu.render(self.display, self.sub_phase)
+
                 # draw banners
                 self.display.blit(self.banner_top, (self.banner_top_rect.x, self.banner_top_rect.y + major_scroll))
                 self.display.blit(self.banner_bottom, (self.banner_bottom_rect.x, self.banner_bottom_rect.y + major_scroll))
@@ -856,10 +944,10 @@ class ShugrPiOS:
                     battery_percent = pygame.system.get_power_state().battery_percent if pygame.system.get_power_state().battery_percent is not None else 100
                 else:
                     battery_percent = 100
-                self.display.blit(self.battery_image if battery_percent > 25 else self.battery_image_low,
+                self.display.blit(self.battery_image if battery_percent > 30 else self.battery_image_low,
                                   (display_width - 90, self.banner_top_rect.y + int(self.banner_top_rect.height * .75) - self.battery_image.get_height() // 2 + major_scroll))
                 draw_text(self.display, str(battery_percent) + "%", display_width - 36 - (6 * len(str(battery_percent) + "%")),
-                          self.banner_top_rect.y + int(self.banner_top_rect.height * .75) - 6 + major_scroll, WHITE if battery_percent > 25 else (204, 0, 0), 12, centered=False)
+                          self.banner_top_rect.y + int(self.banner_top_rect.height * .75) - 6 + major_scroll, WHITE if battery_percent > 30 else (204, 0, 0), 12, centered=False)
 
                 # draw framerate
                 if len(self.notification_group) == 0 and self.top_index < 2:
@@ -882,6 +970,10 @@ class ShugrPiOS:
                 # run installation (if applicable)
                 if self.install:
                     self.run_installation()
+
+                # run updates (if applicable)
+                if self.is_updating:
+                    self.run_updates(base_path)
 
                 # run game
                 if self.started_game:
@@ -957,7 +1049,6 @@ class ShugrPiOS:
                                 if self.master_index == 0:
                                     self.master_index = 1
                                     self.target_scroll_y = 0
-
                         # select option in sub-menu
                         elif self.sub_phase == 1:
                             if self.master_index == 1:
@@ -976,6 +1067,15 @@ class ShugrPiOS:
                                 if event.key == pygame.K_RIGHT or event.key == pygame.K_DOWN:
                                     self.install_menu.index += 1
                                     self.install_menu.index %= len(self.install_menu.options)
+                        # select option in update-menu
+                        elif self.sub_phase == 3:
+                            if self.update_menu.text_ready and not self.is_updating and self.master_index == 1:
+                                if event.key == pygame.K_LEFT or event.key == pygame.K_UP:
+                                    self.update_menu.index -= 1
+                                    self.update_menu.index %= len(self.update_menu.options)
+                                if event.key == pygame.K_RIGHT or event.key == pygame.K_DOWN:
+                                    self.update_menu.index += 1
+                                    self.update_menu.index %= len(self.update_menu.options)
 
                         # bring up sub-menu / execute game / install game
                         if event.key == pygame.K_RETURN:
@@ -1019,6 +1119,22 @@ class ShugrPiOS:
                                             self.install_menu.activate = False
                                             if sound_working:
                                                 self.sfx_channel.play(self.menu_down_fx)
+                                # select in update-menu
+                                elif self.sub_phase == 3:
+                                    if self.update_menu.text_ready and not self.is_updating:
+                                        if self.update_menu.index == 0:
+                                            if self.update_menu.options[0] == "Update":
+                                                self.is_updating = True
+                                            else:
+                                                pygame.time.wait(1000)
+                                                sys.exit(0)
+                                        else:
+                                            self.sub_phase = 0
+                                            self.update_menu.prompt = self.update_menu.original_prompt
+                                            self.update_menu.activate = False
+                                            if sound_working:
+                                                self.sfx_channel.play(self.menu_down_fx)
+                                            self.update_available = False
 
                             # select top banner
                             elif self.master_index == 0:
@@ -1039,6 +1155,12 @@ class ShugrPiOS:
                                     self.sub_phase = 1
                                     self.install_menu.prompt = self.install_menu.original_prompt
                                     self.install_menu.activate = False
+                                elif self.sub_phase == 3 and self.update_menu.text_ready and not self.is_updating and self.update_menu.options[0] == "Update":
+                                    if sound_working:
+                                        self.sfx_channel.play(self.menu_down_fx)
+                                    self.sub_phase = 1
+                                    self.update_menu.prompt = self.update_menu.original_prompt
+                                    self.update_menu.activate = False
                             elif self.master_index == 0:
                                 self.master_index = 1
                                 self.target_scroll_y = 0
@@ -1226,6 +1348,7 @@ class ShugrPiOS:
         logger.info("Shutting down...")
         self.running = False
         pygame.quit()
+        self.stop_event.set()
         self.wifi_thread.join()
         logger.info("Shutdown complete!")
         sys.exit()
