@@ -802,9 +802,9 @@ class ShugrPiOS:
     def run_updates(self, repo_path):
         try:
             if self.is_shugr_pi:
-                self.update_menu.prompt = "Fetching updates..."
+                self.update_menu.prompt = "Fetching Updates..."
                 self.update_menu.render(self.display, self.sub_phase)
-                self.update_menu.options = []
+                self.update_menu.activate = True
                 self.screen.blit(self.display,
                                  (screen_width // 2 - display_width // 2, screen_height // 2 - display_height // 2))
                 pygame.display.flip()
@@ -813,8 +813,9 @@ class ShugrPiOS:
                 logger.info("Pulling origin...")
                 proc = subprocess.run(["git", "pull", "--ff-only"], cwd=repo_path, check=True)
 
-                self.update_menu.prompt = "Finishing up..."
+                self.update_menu.prompt = "Finishing Up..."
                 self.update_menu.render(self.display, self.sub_phase)
+                self.update_menu.options = []
                 self.screen.blit(self.display,
                                  (screen_width // 2 - display_width // 2, screen_height // 2 - display_height // 2))
                 pygame.display.flip()
@@ -827,6 +828,7 @@ class ShugrPiOS:
                 self.update_menu.prompt = "Updated! The SHUGRPI will now reboot."
                 self.update_menu.render(self.display, self.sub_phase)
                 self.update_menu.options = ["OK"]
+                self.update_menu.activate = False
                 logger.info("Update successful!")
                 self.is_updating = False
                 self.update_available = False
