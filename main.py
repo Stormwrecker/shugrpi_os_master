@@ -804,19 +804,29 @@ class ShugrPiOS:
             if self.is_shugr_pi:
                 self.update_menu.prompt = "Fetching updates..."
                 self.update_menu.render(self.display, self.sub_phase)
-                self.options = []
+                self.update_menu.options = []
+                self.screen.blit(self.display,
+                                 (screen_width // 2 - display_width // 2, screen_height // 2 - display_height // 2))
+                pygame.display.flip()
+                self.clock.tick(FPS)
+
                 logger.info("Pulling origin...")
                 proc = subprocess.run(["git", "pull", "--ff-only"], cwd=repo_path, check=True)
 
                 self.update_menu.prompt = "Finishing up..."
                 self.update_menu.render(self.display, self.sub_phase)
+                self.screen.blit(self.display,
+                                 (screen_width // 2 - display_width // 2, screen_height // 2 - display_height // 2))
+                pygame.display.flip()
+                self.clock.tick(FPS)
+
                 # Update dependencies inside OS venv
                 subprocess.run(["bash", "-c", "source .venv/bin/activate && pip install -r requirements.txt"], cwd=repo_path, check=True)
                 logger.info("Re-installing dependencies...")
 
                 self.update_menu.prompt = "Updated! The SHUGRPI will now reboot."
                 self.update_menu.render(self.display, self.sub_phase)
-                self.options = ["OK"]
+                self.update_menu.options = ["OK"]
                 logger.info("Update successful!")
                 self.is_updating = False
                 self.update_available = False
