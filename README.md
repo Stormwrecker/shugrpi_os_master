@@ -35,7 +35,7 @@ except Exception as e:
 * Limit your player/user controls to what's actually available. I plan on having one thumbstick, one d-pad, two start/select buttons, one home button, and four action buttons.
 * Scale your display to 800x450 if you want to preserve a 16:9 ratio. Otherwise, using 800x480 for fullscreen works too.
 * Call `pygame.quit()` after your main loop. This is a no-brainer, but things will probably break without calling it.
-* * Create a `game_config.json` file if you want to change how your game is run. Otherwise, the OS will auto-create one with default values.
+* Create a `game_config.json` file if you want to change how your game is run. Otherwise, the OS will auto-create one with default values.
 
 Here is a template `game_config.json`:
 `{"name": Display Name", "thumbnail": "path/to/thumbnail.png", "run_type": ".py", "use_venv": 0, "python_version":"3.13"}`
