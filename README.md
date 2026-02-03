@@ -15,6 +15,9 @@ Pretty simple stuff.
 ## Notes:
 While the OS is designed on a Windows machine, there are certain functionalities that will **not** do anything if running on a non-Pi device. The variable `is_shugr_pi` detects if running on an `aarch64` machine (regardless of using Linux or not) and is used for when wanting to run certain commands (e.g. git commands, python commands). There are all sorts of features the SHUGRPi is capable of, such as detecting updates, setting the Pi's clock, configuring network connections, and powering off the system.
 
+## Is RetroPie used for the SHUGRPi?
+No. The SHUGRPi OS is independent from RetroPie and any other emulation OS, and although no emulation is involved, SHUGRPi OS is a comparable piece of software. It was originally meant to run Pygame apps, but with the way it works, it can run other apps as well (not tested). If your goal is to play old retro games, you can either a) use RetroPie instead or b) make retro games in Pygame. 🙂
+
 ## How to Build
 In the `/docs` folder, I have included a pdf that runs through how to build the SHUGRPi from source. I plan on having a pre-made disk image that you can use to flash the Pi with, but for now, the pdf will have to do. Explanations are a bit scarce in the instructions, so if you run into issues, please report them in the Issues page.
 
