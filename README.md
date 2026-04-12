@@ -1,7 +1,7 @@
 **Developer's Note: This is the active repository for the SHUGRPi project.**
 
 # What is a SHUGRPi?
-The **S**tormwrecker **H**andheld **U**ndersized **G**aming **R**aspberry **Pi** (or SHUGRPi for short) is a handheld gaming console that runs off of Pygame and runs Pygame games. It uses a Raspberry Pi 5 for computing.
+The **S**tormwrecker **H**andheld **U**nleashed **G**aming **R**aspberry **Pi** (or SHUGRPi for short) is a handheld gaming console that runs off of Pygame and runs Pygame games. It uses a Raspberry Pi 5 for computing.
 
 ## How does it work technically?
 The custom launcher `main.py` runs alongside Openbox (a lightweight window manager) on boot-up via `startx`. From there, you can run your games. If the launcher fails or quits, it simply restarts after a second or two.
