@@ -8,13 +8,14 @@ import logging
 import time
 from socket import gethostbyname, gethostname
 
-
+# misc values
 base_path = os.path.dirname(os.path.abspath(__file__))
 is_shugrpi = False
 default_font = os.path.join(base_path, "fonts", "PressStart2P.ttf")
+font_cache = {}
+all_fonts = []
 
-
-
+# set up logger
 logging.basicConfig(
     level="INFO",
     format="%(levelname)s - %(message)s",
@@ -78,35 +79,54 @@ class AudioManager:
         self._load_sounds()
         self._load_musics()
 
+    def _get_sound_path(self, path):
+        return os.path.join(base_path, "audio", path + ".wav")
+
     def _load_sounds(self):
-        pass
+        self.master_sounds["logo"] = [pygame.mixer.Sound(self._get_sound_path("shugr_pi_alt")), .75, False]
 
     def _load_musics(self):
         pass
 
     def play_sound(self, sound):
-        if self.sound_working:
+        if self.sound_working and not self.master_sounds[sound][2]:
             self.master_sounds[sound][0].set_volume(self.master_sounds[sound][1])
             self.master_sounds[sound][0].play(0)
+            self.master_sounds[sound][2] = True
 
     def stop_sound(self, sound):
         if self.sound_working:
             self.master_sounds[sound][0].stop()
+            self.master_sounds[sound][2] = False
 
     def stop_all(self):
         if self.sound_working:
             pygame.mixer.stop()
 
 
-def load_image(path, alpha=None):
+""" Image Utilities """
+
+def load_image(path, alpha=False):
     try:
-        if alpha is None:
-            return pygame.image.load(temp_path).convert()
+        if not alpha:
+            return pygame.image.load(path).convert()
         else:
-            return pygame.image.load(temp_path).convert_alpha()
-    except:
-        logger.warning(f"unable to locate '{path}'")
+            return pygame.image.load(path).convert_alpha()
+    except Exception as e:
+        logger.warning(f"unable to load '{path}': {e}")
         return pygame.image.load(os.path.join(base_path, "images", "fail_load.png")).convert()
+
+
+def preload_images():
+    master_images = {}
+    image_path = os.path.join(base_path, "images")
+    alpha_images = ["icon"]
+    for temp_file in os.listdir(image_path):
+        temp_path = os.path.join(image_path, temp_file)
+        if os.path.isfile(temp_path):
+            do_alpha = True if temp_file.split(".")[0] in alpha_images else False
+            master_images[temp_file.split(".")[0]] = load_image(os.path.join(image_path, temp_file), do_alpha)
+    return master_images
 
 
 def load_thumbnail(thumb_path):
@@ -118,6 +138,8 @@ def load_thumbnail(thumb_path):
         return pygame.image.load(os.path.join(base_path, "images", "fail_load.png")).convert()
 
 
+""" Internet Utilities"""
+
 def check_internet_status():
     my_ip = gethostbyname(gethostname())
     internet_connection = False
@@ -126,9 +148,9 @@ def check_internet_status():
     return internet_connection
 
 
+""" Text Utilities """
+
 # font handling
-font_cache = {}
-all_fonts = []
 def get_font(font, size):
     actual_font = str(font) + str(size)
     if actual_font not in font_cache:
@@ -170,9 +192,10 @@ class Text(pygame.sprite.Sprite):
         display.blit(self.image, self.rect)
 
 
+""" Various Utilities """
+
 # get general information about a game
 def get_game_info(game_path, game_app):
-
     # calculate game size
     total_size = 0
     for root, _, files in os.walk(game_path):
@@ -189,6 +212,32 @@ def get_game_info(game_path, game_app):
             "last_played":last_played}
 
 
+# timer object
+class Timer:
+    def __init__(self, value, repeat=False):
+        self.start_value = value
+        self.floating_value = value
+        self.value = value
+        self.repeat = repeat
+        self.stopped = False
+
+    def update(self, dt):
+        if not self.stopped:
+            if self.value > 0:
+                self.floating_value -= dt
+                self.value = int(self.floating_value)
+            if self.value <= 0:
+                if not self.repeat:
+                    self.floating_value = 0
+                    self.value = 0
+                    self.stopped = True
+                else:
+                    self.floating_value = self.start_value
+                    self.value = int(self.floating_value)
+        return self.stopped
+
+
+
 __all__ = ["CompatibilityManager",
            "AudioManager",
            "load_image",
@@ -198,4 +247,6 @@ __all__ = ["CompatibilityManager",
            "Text",
            "get_game_info",
            "logger",
-           "load_thumbnail"]
+           "load_thumbnail",
+           "preload_images",
+           "Timer"]

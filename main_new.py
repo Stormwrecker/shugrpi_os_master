@@ -5,28 +5,28 @@ designed specifically for the SHUGRPi
 Code and Assets by Stormwrecker
 All Rights Reserved
 """
-import sys
 
-# import utilities
+# get necessary utilities
 from utils import *
 from constants import *
 import os
-import platform
-
+import sys
 
 # initialize Compatibilty Manager
 c = CompatibilityManager()
 is_shugrpi, base_path, os.environ = c.init()
 
-
 # import pygame
 import pygame
+from pygame.locals import *
+
+# pygame-ce check
 if hasattr(pygame, "IS_CE"):
     logger.info("Successfully loaded pygame-ce")
     is_ce = True
 else:
     logger.warning("SHUGRPi requires pygame-ce: got pygame instead")
-    logger.warning("Certain features are unavailable")
+    logger.warning("Certain features will be unavailable")
     is_ce = False
 
 # import other modules
@@ -41,29 +41,12 @@ from shutil import rmtree
 # initialize pygame
 pygame.init()
 
-# setup audio handler
-a = AudioManager(logger, is_shugrpi)
+# create window
+flags = NOFRAME | FULLSCREEN | SCALED if is_shugrpi else NOFRAME
+screen = pygame.display.set_mode((DISPLAY_WIDTH, DISPLAY_HEIGHT), flags)
 
-
-# setup window and display sizes
-display_width, display_height = (800, 480)
-screen_width, screen_height = (display_width, display_height)
-half_display_x = display_width // 2
-half_display_y = display_height // 2
-screen = pygame.display.set_mode((display_width, display_height))
-display = pygame.Surface((display_width, display_height)).convert()
-
-clock = pygame.time.Clock()
-
-
-fail_image = pygame.image.load(os.path.join(base_path, "images", "fail_load.png")).convert()
-
-
-# shutdown method
-def shutdown():
-    pygame.quit()
-    sys.exit()
-
+# load all images
+master_images = preload_images()
 
 # main ui group
 ui_group = pygame.sprite.Group()
@@ -71,16 +54,16 @@ ui_group = pygame.sprite.Group()
 
 # generic UI element
 class UiElement(pygame.sprite.Sprite):
-    def __init__(self, label, x, y, row, col, width=50, height=20):
+    def __init__(self, label, x, y, row, col, padding=8):
         pygame.sprite.Sprite.__init__(self, ui_group)
         self.row = row
         self.col = col
 
-        self.width = width
-        self.height = height
-        self.rect = pygame.Rect((x, y, width, height))
+        pre_rect = pygame.Rect((x, y, 10, 10))
 
-        self.text = Text(label, self.rect.centerx, self.rect.centery, WHITE, 8, centered=True)
+        self.text = Text(label, pre_rect.centerx, pre_rect.centery, WHITE, padding, centered=True)
+        r = self.text.rect
+        self.rect = pygame.Rect((r.x - padding//2, r.y - padding//2, r.width + padding, r.height + padding))
 
         self.selected = False
 
@@ -149,7 +132,6 @@ class GameManager:
     def __init__(self):
         self.games = {}
         self.game_titles = []
-
         self.sort_types = ["size", "last_played_raw"]
 
     def setup_placeholder(self, path):
@@ -234,71 +216,165 @@ class GameManager:
                 self.games[d]["last_played_raw"] = game_info["last_played_raw"]
                 self.games[d]["last_played"] = game_info["last_played"]
 
+        return self.games
+
     def sort_games(self, sort_type, reversed=False):
-        sort_key = self.sort_types[sort_type]
+        """0 - size, 1 - last_played"""
+        if sort_type <= len(self.sort_types):
+            sort_key = self.sort_types[sort_type]
 
-        temp_dict = self.games.copy()
-        temp_list = []
-        sorted_games = sorted(temp_dict, key=lambda game: temp_dict[game][sort_key], reverse=reversed)
-        print(sorted_games)
+            temp_dict = self.games.copy()
+            self.games = dict(sorted(temp_dict.items(), key=lambda game: game[1][sort_key], reverse=reversed))
 
-
-# test
-text = Text("Hello World", 100, 100, GREEN, 10, centered=True)
-
-game_manager = GameManager()
-game_manager.scan_games("games")
-
-game_manager.sort_games(1)
-print(game_manager.games)
+        return self.games
 
 
-# make buttons
-count = 0
-for y in range(5):
-    for x in range(4):
-        UiElement(f"Btn {count}", x * 50, y * 50, y, x)
-        count += 1
+# main SHUGRPi OS app
+class ShugrPiOS:
+    def __init__(self, is_shugrpi, master_images):
+        """ Master class for the SHUGRPi Operating System """
+        self.is_shugrpi = is_shugrpi
+        logger.info(f"Running on SHUGRPi: {'yes' if is_shugrpi else 'no'}")
 
-# ui group management
-ui_manager = UiManager(ui_group)
+        """ window/display setup """
+        self.screen = screen
+        self.display = pygame.Surface((DISPLAY_WIDTH, DISPLAY_HEIGHT)).convert()
+        pygame.display.set_icon(master_images["icon"])
+        self.display_info = pygame.display.Info()
+        logger.info("Video Driver: " + pygame.display.get_driver().capitalize())
+        logger.info("Hardware acceleration: " + str(bool(self.display_info.hw)))
+        logger.info("Video memory: " + str(self.display_info.video_mem))
+        logger.info("Initialized display")
 
-# main loop
-run = True
-while run:
-    # fill screen
-    screen.fill(BLACK)
-    display.fill(BLACK)
+        """ time setup """
+        self.clock = pygame.time.Clock()
+        self.timers = {}
 
-    """update stuff here..."""
-    ui_manager.update()
+        """ manager setup """
+        self.gm = GameManager()
+        self.am = AudioManager(logger, self.is_shugrpi)
 
-    """draw stuff here..."""
-    text.draw(display)
-    ui_manager.draw(display)
+        """ asset setup """
+        self.fail_image = master_images["fail_load"]
 
-    # handle events
-    all_events = pygame.event.get()
-    for event in all_events:
-        if event.type == pygame.QUIT:
-            run = False
-            break
-        if event.type == pygame.KEYDOWN:
-            if event.key == pygame.K_LEFT:
-                ui_manager.change_col(-1)
-            if event.key == pygame.K_RIGHT:
-                ui_manager.change_col(1)
-            if event.key == pygame.K_UP:
-                ui_manager.change_row(-1)
-            if event.key == pygame.K_DOWN:
-                ui_manager.change_row(1)
+        self.original_logo_img = self.get_image("logo")
+        self.logo_img = pygame.transform.scale(self.original_logo_img, (int(165 * 3), int(165 * 3)))
+        self.big_logo_img = pygame.transform.scale(self.original_logo_img, (int(165 * 4), int(165 * 4)))
+        self.logo_alpha = 0
+        self.logo_img.set_alpha(self.logo_alpha)
 
-    # render display
-    screen.blit(pygame.transform.scale(display, screen.get_size()), (0, 0))
-    pygame.display.flip()
+        self.timers["logo"] = Timer(120)
+        self.timers["start"] = Timer(180)
 
-    # tick clock
-    clock.tick(FPS)
+        """ utility setup """
+        self.internet_connection = check_internet_status()
+        self.stop_event = threading.Event()
+        self.wifi_lock = threading.Lock()
+        self.wifi_thread = threading.Thread(target=self.update_internet_connection, daemon=True)
+        self.wifi_thread.start()
 
-# quit pygame
-shutdown()
+        """ games setup """
+        self.master_games_path = os.path.join(base_path, GAME_PATH)
+        self.games = self.gm.scan_games(self.master_games_path)
+        self.games = self.gm.sort_games(1, True)
+
+        """ master phase variable """
+        self.master_phase = -1
+
+        """ master running variable """
+        self.running = True
+
+    def update_internet_connection(self):
+        try:
+            while not self.stop_event.wait(3):
+                with self.wifi_lock:
+                    self.internet_connection = check_internet_status()
+        except Exception as e:
+            logger.error(f"Failed to update internet status: {e}")
+
+    def check_for_updates(self):
+        pass
+
+    def run_updates(self):
+        pass
+
+    def run(self):
+        while self.running:
+            try:
+                self.update()
+                self.events()
+                self.draw()
+            except (Exception, KeyboardInterrupt) as e:
+                if isinstance(e, Exception):
+                    logger.error(f"SHUGRPi has crashed due to the following error: {e}")
+                self.shutdown()
+
+    def update(self):
+        # tick clock
+        dt = self.clock.tick(FPS) / 1000 * FPS
+
+        if self.master_phase == -1:
+            if not self.timers["start"].update(dt):
+                if self.timers["start"].value <= 120:
+                    if self.logo_alpha < 255:
+                        self.logo_alpha += 5 * dt
+                    else:
+                        self.logo_alpha = 255
+                        self.am.play_sound("logo")
+            else:
+                if not self.timers["logo"].update(dt):
+                    if self.timers["logo"].value <= 90:
+                        if self.logo_alpha > 0:
+                            self.logo_alpha -= 5 * dt
+                        else:
+                            self.logo_alpha = 0
+                else:
+                    if self.logo_alpha == 0:
+                        self.master_phase = 0
+                        self.logo_alpha = 0
+                        logger.info("Finished initializing ShugrPi OS")
+                        logger.info("Running main loop")
+
+    def events(self):
+        # handle events
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                self.shutdown()
+            if event.type == pygame.KEYDOWN:
+                # shutdown
+                if event.key == pygame.K_ESCAPE:
+                    self.shutdown()
+
+    def draw(self):
+        if self.master_phase == -1:
+            self.display.fill(DARKER_GRAY)
+            self.logo_img.set_alpha(int(self.logo_alpha))
+            self.display.blit(self.logo_img, (
+            half_display_x - self.logo_img.get_width() // 2, half_display_y - self.logo_img.get_height() // 2))
+
+        elif self.master_phase == 0:
+            # fill screen with dark gray
+            self.display.fill(DARK_GRAY)
+
+        self.screen.blit(pygame.transform.scale(self.display, self.screen.get_size()), (0, 0))
+        pygame.display.flip()
+
+    def get_image(self, img):
+        try:
+            return master_images[img]
+        except:
+            return master_images["fail_load_alt"]
+
+    def shutdown(self):
+        logger.info("Shutting down...")
+        self.running = False
+        pygame.quit()
+        self.stop_event.set()
+        self.wifi_thread.join()
+        logger.info("Shutdown complete!")
+        sys.exit()
+
+
+# start up SHUGRPi OS
+shugrpi_os = ShugrPiOS(is_shugrpi, master_images)
+shugrpi_os.run()
