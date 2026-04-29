@@ -21,8 +21,8 @@ half_display_y = DISPLAY_HEIGHT // 2
 
 GAME_PATH = "games"
 
-DEFAULT_DISPLAY_CONFIG = {"name": "Name Not Available",
-                          "thumbnail": 0,
-                          "run_type": ".py",
-                          "use_venv": 0,
-                          "python_version": "3.13"}
+DEFAULT_GAME_CONFIG = {"name": "Name Not Available",
+                       "thumbnail": None,
+                       "exec_type": "py",
+                       "use_venv": False,
+                       "python_version": "3.13"}

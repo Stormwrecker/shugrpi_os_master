@@ -13,11 +13,10 @@ base_path = os.path.dirname(os.path.abspath(__file__))
 is_shugrpi = False
 default_font = os.path.join(base_path, "fonts", "PressStart2P.ttf")
 font_cache = {}
-all_fonts = []
 
 # set up logger
 logging.basicConfig(
-    level="INFO",
+    level=logging.INFO,
     format="%(levelname)s - %(message)s",
     handlers=[logging.FileHandler(os.path.join(base_path, "session.log"), "w"),
               logging.StreamHandler()]
@@ -84,15 +83,16 @@ class AudioManager:
 
     def _load_sounds(self):
         self.master_sounds["logo"] = [pygame.mixer.Sound(self._get_sound_path("shugr_pi_alt")), .75, False]
+        self.master_sounds["menu_swish"] = [pygame.mixer.Sound(self._get_sound_path("menu_swish")), .4, False]
 
     def _load_musics(self):
         pass
 
-    def play_sound(self, sound):
+    def play_sound(self, sound, in_loop=True):
         if self.sound_working and not self.master_sounds[sound][2]:
             self.master_sounds[sound][0].set_volume(self.master_sounds[sound][1])
             self.master_sounds[sound][0].play(0)
-            self.master_sounds[sound][2] = True
+            self.master_sounds[sound][2] = in_loop
 
     def stop_sound(self, sound):
         if self.sound_working:
@@ -129,13 +129,12 @@ def preload_images():
     return master_images
 
 
-def load_thumbnail(thumb_path):
-    temp_path = os.path.join(base_path, thumb_path)
+def load_thumbnail(thumb_path, fail_image):
     try:
-        pygame.image.load(temp_path).convert()
+        return pygame.image.load(thumb_path).convert()
     except:
-        logger.warning(f"unable to locate '{temp_path}'")
-        return pygame.image.load(os.path.join(base_path, "images", "fail_load.png")).convert()
+        logger.warning(f"unable to locate '{thumb_path}'")
+        return fail_image
 
 
 """ Internet Utilities"""
@@ -232,10 +231,9 @@ class Timer:
                     self.value = 0
                     self.stopped = True
                 else:
-                    self.floating_value = self.start_value
+                    self.floating_value += self.start_value
                     self.value = int(self.floating_value)
         return self.stopped
-
 
 
 __all__ = ["CompatibilityManager",

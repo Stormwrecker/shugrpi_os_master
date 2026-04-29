@@ -47,8 +47,9 @@ screen = pygame.display.set_mode((DISPLAY_WIDTH, DISPLAY_HEIGHT), flags)
 
 # load all images
 master_images = preload_images()
+pygame.display.set_icon(master_images["icon"])
 
-# main ui group
+# groups
 ui_group = pygame.sprite.Group()
 
 
@@ -127,38 +128,98 @@ class UiManager:
             ui.draw(display)
 
 
+# game object
+class Game(pygame.sprite.Sprite):
+    def __init__(self, configs, index, x, y, wheel_rect, angle):
+        self._init_metadata(configs)
+
+        self.z_depth = 0
+        self.wheel_rect = wheel_rect
+
+        self.base_angle = angle
+        self.angle = angle
+
+        pygame.sprite.Sprite.__init__(self)
+        self.image = pygame.transform.scale(self.thumbnail, (150, 200))
+        self.rect = self.image.get_rect()
+        self.rect.center = (x, y)
+
+        self.index = index
+        self.selected = False
+
+    def _init_metadata(self, configs):
+        self.name = configs["name"]
+        self.root_path = configs["root_path"]
+
+        self.size = configs["size"]
+        self.last_played_raw = configs["last_played_raw"]
+        self.last_played = configs["last_played"]
+
+        self.exec_type = configs["exec_type"]
+        self.use_venv = configs["use_venv"]
+        self.python_version = configs.get("python_version")
+
+        self.thumbnail = load_thumbnail(os.path.join(self.root_path, configs["thumbnail"]), master_images["fail_load"])
+
+        self.executable = configs["executable"]
+
+    def update(self, index, angle):
+        current_angle = self.base_angle + math.radians(angle)
+
+        # center rect based on wheel_ui pos
+        self.rect.midbottom = (int(math.cos(current_angle) * self.wheel_rect.width) + self.wheel_rect.centerx,
+                               int(math.sin(current_angle) * self.wheel_rect.height) + self.wheel_rect.centery + 40)
+
+        self.z_depth = math.sin(current_angle) + 2
+
+        if self.index == index:
+            self.selected = True
+        else:
+            self.selected = False
+
+    def execute(self):
+        return self.executable
+
+    def draw(self, display):
+        display.blit(self.image, self.rect)
+
+
 # game manager
 class GameManager:
     def __init__(self):
-        self.games = {}
+        self.games = []
+
         self.game_titles = []
         self.sort_types = ["size", "last_played_raw"]
 
-    def setup_placeholder(self, path):
+    @staticmethod
+    def _setup_placeholder(path):
         logger.warning(f"Valid game directory does not exist in {path}")
 
         os.makedirs(os.path.join(path, "placeholder"))
         with open(os.path.join(path, "placeholder", "main.py"), "w") as f:
             f.write('raise Exception("not a real game")')
-            f.close()
+
 
         with open(os.path.join(path, "placeholder", "game_config.json"), "w") as f:
             pygame.image.save(load_image("placeholder_thumb.png"), os.path.join(path, "placeholder", "thumbnail.png"))
             f.write('{"name": "Placeholder", "thumbnail": "thumbnail.png", "run_type": ".py", "use_venv": 0}')
-            f.close()
 
         logger.info(f"Created game directory in {path}")
 
-    def scan_games(self, path):
+    def load_games(self, path):
         # create master games directory
         if not os.path.exists(path):
-            self.setup_placeholder(path)
+            self._setup_placeholder(path)
 
         # get all directories
         all_dirs = [d for d in os.listdir(path) if os.path.isdir(os.path.join(path, d))]
         if len(all_dirs) <= 0:
-            self.setup_placeholder(path)
+            self._setup_placeholder(path)
             all_dirs = [d for d in os.listdir(path) if os.path.isdir(os.path.join(path, d))]
+
+        # temporary list for games' data
+        all_games_data = []
 
         # get all valid games
         for d in all_dirs:
@@ -175,8 +236,8 @@ class GameManager:
             else:
                 continue
 
-            # configuration data for displaying games in UI
-            config_data = DEFAULT_DISPLAY_CONFIG
+            # configuration data for games
+            config_data = DEFAULT_GAME_CONFIG.copy()
 
             # if a valid game is encountered
             if game_app:
@@ -189,7 +250,7 @@ class GameManager:
                 if not os.path.exists(config_file):
                     logger.error(f"'{d}' configurations do not exist; Reverting to default")
                     with open(config_file, "w") as f:
-                        json.dump(DEFAULT_DISPLAY_CONFIG, f)
+                        json.dump(DEFAULT_GAME_CONFIG, f)
 
                 # if file does exist, read it
                 else:
@@ -197,36 +258,104 @@ class GameManager:
                     with open(config_file, "r") as f:
                         config_data = json.load(f)
 
-                    # if thumbnail exists, load it
-                    if config_data["thumbnail"] != DEFAULT_DISPLAY_CONFIG["thumbnail"]:
-                        thumb_img = load_thumbnail(os.path.join(path, d, config_data["thumbnail"]))
-                        logger.info(f"Valid thumbnail detected in '{d}'")
-                    else:
-                        thumb_img = fail_image
-                        logger.error(f"No thumbnail detected in '{d}'. Revert to default")
-                    config_data["thumbnail"] = thumb_img
-
-                # add game/configuration to games
-                self.games[d] = config_data
-                self.game_titles.append(d)
-
+                # set configurations
+                config_data["root_path"] = os.path.join(path, d)
+                config_data["executable"] = game_app
                 game_info = get_game_info(os.path.join(path, d), game_app)
 
-                self.games[d]["size"] = game_info["size"]
-                self.games[d]["last_played_raw"] = game_info["last_played_raw"]
-                self.games[d]["last_played"] = game_info["last_played"]
+                config_data["size"] = game_info["size"]
+                config_data["last_played_raw"] = game_info["last_played_raw"]
+                config_data["last_played"] = game_info["last_played"]
 
-        return self.games
+                # add game/configuration to games
+                all_games_data.append(config_data)
+
+        return all_games_data
 
     def sort_games(self, sort_type, reversed=False):
         """0 - size, 1 - last_played"""
-        if sort_type <= len(self.sort_types):
+        if sort_type < len(self.sort_types):
             sort_key = self.sort_types[sort_type]
 
-            temp_dict = self.games.copy()
-            self.games = dict(sorted(temp_dict.items(), key=lambda game: game[1][sort_key], reverse=reversed))
+            games_copy = self.games.copy()
+            self.games = sorted(games_copy, key=lambda game: game.__dict__[sort_key], reverse=reversed)
 
         return self.games
+
+
+# game wheel object
+class GameWheelUi:
+    def __init__(self, x, y, w, h, g):
+        self.rect = pygame.Rect((x, y, w, h))
+        self.rect.center = (x, y)
+
+        self.shadow_rect = pygame.Rect((self.rect.centerx - (w * 1.5),
+                                        self.rect.centery - 20, w * 3, h * 2))
+
+        # angles and indices
+        self.master_index = 0
+        self.target_index = 0
+        self.master_angle = 0
+        self.target_angle = 0
+        self.bottom_angle = math.radians(90)
+
+        # get games' data
+        self.all_games_data = g
+
+        # all games
+        self.games = []
+
+        # get angles for even spacing
+        self.item_angle = 0
+        self.num_items = len(self.all_games_data)
+        self.angle_increment = 360 / self.num_items if self.num_items > 0 else 0
+
+        # add games to wheel
+        for index, data in enumerate(self.all_games_data):
+            self.item_angle = math.radians(self.angle_increment * index + 90)
+            x = int(math.cos(self.item_angle) * self.rect.width) + self.rect.centerx
+            y = int(math.sin(self.item_angle) * self.rect.height) + self.rect.centery
+            self.games.append(Game(data, index, x, y, self.rect, self.item_angle))
+
+    def get_games(self):
+        return self.games
+
+    def update(self, dt):
+        # adjust target values
+        self.master_index = self.target_index
+        self.target_angle = self.angle_increment * self.target_index
+
+        # normalize target_angle to prevent floating-point overflow
+        self.target_angle %= 360
+
+        # smoothly interpolate towards target_angle
+        angle_diff = (self.target_angle - self.master_angle) % 360
+        if angle_diff > 180:
+            angle_diff -= 360
+
+        if abs(angle_diff) > dt * 0.15:
+            self.master_angle += (angle_diff * 0.15) * dt
+        else:
+            self.master_angle = self.target_angle
+
+        # Keep master_angle normalized
+        self.master_angle %= 360
+
+        for game in self.games:
+            game.update(self.master_index, self.master_angle)
+
+    def update_index(self, delta, audio_manager):
+        self.target_index += delta
+        self.target_index %= self.num_items
+        audio_manager.play_sound("menu_swish", False)
+
+    def draw(self, display):
+        pygame.draw.ellipse(display, GRAY, self.shadow_rect)
+        sorted_sprites = sorted(self.games, key=lambda x: x.z_depth)
+        for sprite in [s for s in sorted_sprites if s.z_depth < 2.0]:
+            display.blit(sprite.image, sprite.rect)
+        for sprite in [s for s in sorted_sprites if s.z_depth >= 2.0]:
+            display.blit(sprite.image, sprite.rect)
 
 
 # main SHUGRPi OS app
@@ -242,8 +371,6 @@ class ShugrPiOS:
         pygame.display.set_icon(master_images["icon"])
         self.display_info = pygame.display.Info()
         logger.info("Video Driver: " + pygame.display.get_driver().capitalize())
-        logger.info("Hardware acceleration: " + str(bool(self.display_info.hw)))
-        logger.info("Video memory: " + str(self.display_info.video_mem))
         logger.info("Initialized display")
 
         """ time setup """
@@ -251,8 +378,8 @@ class ShugrPiOS:
         self.timers = {}
 
         """ manager setup """
-        self.gm = GameManager()
         self.am = AudioManager(logger, self.is_shugrpi)
+        self.gm = GameManager()
 
         """ asset setup """
         self.fail_image = master_images["fail_load"]
@@ -270,13 +397,13 @@ class ShugrPiOS:
         self.internet_connection = check_internet_status()
         self.stop_event = threading.Event()
         self.wifi_lock = threading.Lock()
-        self.wifi_thread = threading.Thread(target=self.update_internet_connection, daemon=True)
+        self.wifi_thread = threading.Thread(name="SHUGRPi Internet Updater", target=self.update_internet_connection, daemon=True)
         self.wifi_thread.start()
 
         """ games setup """
         self.master_games_path = os.path.join(base_path, GAME_PATH)
-        self.games = self.gm.scan_games(self.master_games_path)
-        self.games = self.gm.sort_games(1, True)
+        all_games_data = self.gm.load_games(self.master_games_path)
+        self.game_wheel = GameWheelUi(half_display_x, half_display_y + 60, 175, 55, all_games_data)
 
         """ master phase variable """
         self.master_phase = -1
@@ -298,12 +425,17 @@ class ShugrPiOS:
     def run_updates(self):
         pass
 
+    def sort_games(self, sort_type, reversed=False):
+        self.games = self.gm.sort_games(sort_type, reversed)
+
     def run(self):
         while self.running:
+            self.update()
+            self.events()
+            self.draw()
+
             try:
-                self.update()
-                self.events()
-                self.draw()
+                pass
             except (Exception, KeyboardInterrupt) as e:
                 if isinstance(e, Exception):
                     logger.error(f"SHUGRPi has crashed due to the following error: {e}")
@@ -311,7 +443,7 @@ class ShugrPiOS:
 
     def update(self):
         # tick clock
-        dt = self.clock.tick(FPS) / 1000 * FPS
+        dt = self.clock.tick(FPS) / 1000.0 * 60
 
         if self.master_phase == -1:
             if not self.timers["start"].update(dt):
@@ -335,7 +467,11 @@ class ShugrPiOS:
                         logger.info("Finished initializing ShugrPi OS")
                         logger.info("Running main loop")
 
+        elif self.master_phase == 0:
+            self.game_wheel.update(dt)
+
     def events(self):
+        global FPS
         # handle events
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
@@ -344,6 +480,13 @@ class ShugrPiOS:
                 # shutdown
                 if event.key == pygame.K_ESCAPE:
                     self.shutdown()
+                if event.key == pygame.K_SPACE:
+                    self.test()
+                if event.key == pygame.K_RETURN:
+                    FPS = 30
+            if event.type == pygame.KEYUP:
+                if event.key == pygame.K_RETURN:
+                    FPS = 60
 
     def draw(self):
         if self.master_phase == -1:
@@ -355,6 +498,8 @@ class ShugrPiOS:
         elif self.master_phase == 0:
             # fill screen with dark gray
             self.display.fill(DARK_GRAY)
+
+            self.game_wheel.draw(self.display)
 
         self.screen.blit(pygame.transform.scale(self.display, self.screen.get_size()), (0, 0))
         pygame.display.flip()
@@ -373,6 +518,9 @@ class ShugrPiOS:
         self.wifi_thread.join()
         logger.info("Shutdown complete!")
         sys.exit()
+
+    def test(self):
+        self.game_wheel.update_index(1, self.am)
 
 
 # start up SHUGRPi OS
