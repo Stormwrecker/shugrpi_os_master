@@ -407,6 +407,7 @@ class ShugrPiOS:
 
         """ master phase variable """
         self.master_phase = -1
+        self.dt = 1
 
         """ master running variable """
         self.running = True
@@ -443,23 +444,24 @@ class ShugrPiOS:
 
     def update(self):
         # tick clock
-        dt = self.clock.tick(FPS) / 1000.0 * 60
+        raw_dt = self.clock.tick(FPS) / 1000.0 * 60
+
+        self.dt = self.dt * 0.9 + raw_dt * 0.1
+        dt = self.dt
 
         if self.master_phase == -1:
             if not self.timers["start"].update(dt):
-                if self.timers["start"].value <= 120:
-                    if self.logo_alpha < 255:
-                        self.logo_alpha += 5 * dt
-                    else:
-                        self.logo_alpha = 255
-                        self.am.play_sound("logo")
+                if self.logo_alpha < 255:
+                    self.logo_alpha += 5 * min(dt, 1)
+                else:
+                    self.logo_alpha = 255
+                    self.am.play_sound("logo")
             else:
                 if not self.timers["logo"].update(dt):
-                    if self.timers["logo"].value <= 90:
-                        if self.logo_alpha > 0:
-                            self.logo_alpha -= 5 * dt
-                        else:
-                            self.logo_alpha = 0
+                    if self.logo_alpha > 0:
+                        self.logo_alpha -= 5 * dt
+                    else:
+                        self.logo_alpha = 0
                 else:
                     if self.logo_alpha == 0:
                         self.master_phase = 0

@@ -212,7 +212,7 @@ def get_game_info(game_path, game_app):
 
 
 # timer object
-class Timer:
+class TimerOld:
     def __init__(self, value, repeat=False):
         self.start_value = value
         self.floating_value = value
@@ -234,6 +234,46 @@ class Timer:
                     self.floating_value += self.start_value
                     self.value = int(self.floating_value)
         return self.stopped
+
+
+class Timer:
+    def __init__(self, duration, repeat=False, action=None):
+        self.duration = float(duration)
+        self.repeat = repeat
+        self.action = action
+
+        self.time = 0.0
+        self.active = True
+        self.finished = False
+        self.value = self.duration - self.time
+
+    def update(self, dt):
+        if not self.active or self.finished:
+            return self.finished
+
+        self.time += dt
+
+        if self.time >= self.duration:
+            if self.action and not self.finished:
+                self.action()
+
+            if self.repeat:
+                self.reset()
+            else:
+                self.time = self.duration
+                self.finished = True
+
+        return self.finished
+
+    def start(self):
+        self.active = True
+
+    def stop(self):
+        self.active = False
+
+    def reset(self):
+        self.time = 0.0
+        self.finished = False
 
 
 __all__ = ["CompatibilityManager",
