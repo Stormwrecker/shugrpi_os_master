@@ -6,12 +6,13 @@ import platform
 import pygame
 import logging
 import time
+import subprocess
 from socket import gethostbyname, gethostname
 
 # misc values
 base_path = os.path.dirname(os.path.abspath(__file__))
 is_shugrpi = False
-default_font = os.path.join(base_path, "fonts", "PressStart2P.ttf")
+default_font = os.path.join(base_path, "fonts", "Kenney_Bold.ttf")
 font_cache = {}
 
 # set up logger
@@ -26,14 +27,16 @@ logger = logging.getLogger("SHUGRPi")
 
 # compatibility management
 class CompatibilityManager:
-    def __init__(self):
+    def __init__(self, logger):
         self.system = {"machine":platform.machine().lower(), "platform":platform.system().lower()}
 
         self.is_shugrpi = False
         if self.system["machine"] == "aarch64" and self.system["platform"] == "linux":
             self.is_shugrpi = True
+        logger.info(f"Running on SHUGRPi: {'yes' if is_shugrpi else 'no'}")
 
         self.base_path = self._update_paths(self.system["platform"])
+        self.audio_driver = None
 
         self._update_env()
 
@@ -44,6 +47,36 @@ class CompatibilityManager:
         elif platform == "linux":
             base_path = os.path.dirname(os.path.abspath(__file__))
         return base_path
+
+    def init_audio_and_driver(self, pg, env, logger, is_shugrpi):
+        drivers = ["wasapi", "alsa", "dummy"]
+
+        for driver in drivers:
+            # try:
+            env["SDL_AUDIODRIVER"] = driver
+            pg.mixer.quit()
+
+
+            if is_shugrpi:
+                pg.mixer.init(48000)
+            else:
+                pg.mixer.init()
+
+            logger.info(f"Using audio driver: {pygame.mixer.get_driver()}")
+            break
+
+            # except pg.error as e:
+            #     logger.error(f"Failed audio driver: {driver} ({e})")
+
+        if self.audio_driver is None:
+            env["SDL_AUDIODRIVER"] = "dummy"
+            pg.mixer.quit()
+            pg.mixer.init()
+            self.audio_driver = "dummy"
+            logger.error(f"No audio drivers available; Revert to dummy")
+
+        return pg, env.copy()
+
 
     def _update_env(self):
         if self.is_shugrpi:
@@ -59,18 +92,6 @@ class CompatibilityManager:
 # audio management
 class AudioManager:
     def __init__(self, logger, is_shugrpi):
-        self.sound_working = False
-        try:
-            if is_shugrpi:
-                pygame.mixer.pre_init(48000)
-                pygame.mixer.init()
-            else:
-                pygame.mixer.init()
-            self.sound_working = True
-            logger.info(f"Initialized pygame.mixer; Using {pygame.mixer.get_driver()} backend")
-        except pygame.error as e:
-            logger.error(f"Initializing pygame.mixer failed; No sound available; {e}")
-
         # master library for sounds and music tracks
         self.master_sounds = {}
         self.master_music_tracks = {}
@@ -89,19 +110,21 @@ class AudioManager:
         pass
 
     def play_sound(self, sound, in_loop=True):
-        if self.sound_working and not self.master_sounds[sound][2]:
+        if not self.master_sounds[sound][2]:
             self.master_sounds[sound][0].set_volume(self.master_sounds[sound][1])
             self.master_sounds[sound][0].play(0)
             self.master_sounds[sound][2] = in_loop
 
     def stop_sound(self, sound):
-        if self.sound_working:
-            self.master_sounds[sound][0].stop()
+        self.master_sounds[sound][0].stop()
+        self.master_sounds[sound][2] = False
+
+    def reset_sounds(self):
+        for sound in self.master_sounds:
             self.master_sounds[sound][2] = False
 
     def stop_all(self):
-        if self.sound_working:
-            pygame.mixer.stop()
+        pygame.mixer.stop()
 
 
 """ Image Utilities """
@@ -175,14 +198,28 @@ class Text(pygame.sprite.Sprite):
     def __init__(self, text, x, y, color, size, font=default_font, centered=False):
         pygame.sprite.Sprite.__init__(self)
         self.text = str(text)
+        self.color = color
 
         self.font = self._get_font(font, size)
-        self.image = self.font.render(self.text, False, color)
+        self.image = self.font.render(self.text, False, self.color)
         self.rect = self.image.get_rect()
-        if centered:
-            self.rect.center = (x, y)
+        self.centered = centered
+        self.x = x
+        self.y = y
+
+        if self.centered:
+            self.rect.center = (self.x, self.y)
         else:
-            self.rect.topleft = (x, y)
+            self.rect.topleft = (self.x, self.y)
+
+    def set_text(self, new_text):
+        self.text = str(new_text)
+        self.image = self.font.render(self.text, False, self.color)
+        self.rect = self.image.get_rect()
+        if self.centered:
+            self.rect.center = (self.x, self.y)
+        else:
+            self.rect.topleft = (self.x, self.y)
 
     def _get_font(self, font, size):
         return get_font(font, size)
@@ -212,30 +249,6 @@ def get_game_info(game_path, game_app):
 
 
 # timer object
-class TimerOld:
-    def __init__(self, value, repeat=False):
-        self.start_value = value
-        self.floating_value = value
-        self.value = value
-        self.repeat = repeat
-        self.stopped = False
-
-    def update(self, dt):
-        if not self.stopped:
-            if self.value > 0:
-                self.floating_value -= dt
-                self.value = int(self.floating_value)
-            if self.value <= 0:
-                if not self.repeat:
-                    self.floating_value = 0
-                    self.value = 0
-                    self.stopped = True
-                else:
-                    self.floating_value += self.start_value
-                    self.value = int(self.floating_value)
-        return self.stopped
-
-
 class Timer:
     def __init__(self, duration, repeat=False, action=None):
         self.duration = float(duration)

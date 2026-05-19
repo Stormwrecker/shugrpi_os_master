@@ -13,7 +13,7 @@ import os
 import sys
 
 # initialize Compatibilty Manager
-c = CompatibilityManager()
+c = CompatibilityManager(logger)
 is_shugrpi, base_path, os.environ = c.init()
 
 # import pygame
@@ -38,12 +38,42 @@ import math
 import random
 from shutil import rmtree
 
+
+# initialize pygame with necessary setups
+def init_pygame():
+    os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
+    pygame.init()
+    logger.info("Initialized pygame-ce")
+
+    # setup audio
+    try:
+        pygame.mixer.init()
+        logger.info(f"Using audio driver: {pygame.mixer.get_driver()}")
+    except pygame.error as e:
+        drivers = ["wasapi", "alsa", "dummy"]
+        active_driver = None
+        for driver in drivers:
+            try:
+                os.environ["SDL_AUDIODRIVER"] = driver
+                pygame.mixer.quit()
+                pygame.mixer.init()
+                active_driver = driver
+                logger.info(f"Using audio driver: {driver}")
+                break
+            except pygame.error as e:
+                logger.error("No audio drivers available")
+
+
 # initialize pygame
-pygame.init()
+init_pygame()
 
 # create window
 flags = NOFRAME | FULLSCREEN | SCALED if is_shugrpi else NOFRAME
 screen = pygame.display.set_mode((DISPLAY_WIDTH, DISPLAY_HEIGHT), flags)
+
+window_title = f"SHUGRPi Operating System v{VERSION}"
+pygame.display.set_caption(window_title)
+pygame.display.set_allow_screensaver(False)
 
 # load all images
 master_images = preload_images()
@@ -51,6 +81,115 @@ pygame.display.set_icon(master_images["icon"])
 
 # groups
 ui_group = pygame.sprite.Group()
+
+
+# screen-size curtain for transitions
+class Curtain(pygame.sprite.Sprite):
+    def __init__(self):
+        pygame.sprite.Sprite.__init__(self)
+        self.color = BLACK
+
+        self.image = pygame.Surface((1, 1), pygame.SRCALPHA)
+        self.image = pygame.transform.scale(self.image, screen.get_size()).convert()
+        self.rect = self.image.get_rect()
+        self.rect.topleft = (0, 0)
+
+        self.image.set_colorkey(WHITE)
+        self.image.fill(self.color)
+
+        self.alpha = 255
+        self.image.set_alpha(self.alpha)
+
+        self.flip = False
+        self.target_alpha = 255
+
+    def update(self, dt):
+        if self.alpha != self.target_alpha:
+            if self.alpha > self.target_alpha:
+                self.alpha = max(int(self.alpha - (20 * dt)), self.target_alpha)
+                self.flip = False
+            elif self.alpha < self.target_alpha:
+                self.alpha = min(int(self.alpha + (20 * dt)), self.target_alpha)
+                self.flip = False
+        else:
+            if self.alpha == 255:
+                self.flip = True
+
+    def set_color(self, new_color):
+        if self.color != new_color:
+            self.image.fill(new_color)
+            self.color = new_color
+
+    def draw(self, display):
+        self.image.set_alpha(self.alpha)
+        if self.alpha:
+            display.blit(self.image, self.rect)
+
+
+# floating logo in background
+class FloatingLogo(pygame.sprite.Sprite):
+    def __init__(self):
+        pygame.sprite.Sprite.__init__(self)
+        self.original_image = pygame.transform.scale(master_images["logo"], (int(165 * 4), int(165 * 4)))
+        self.start_timer = Timer(120)
+        self.timer = Timer(240)
+        self.wait_timer = Timer(random.randint(180, 240))
+        self.reset()
+
+    def reset(self):
+        self.image = self.original_image.copy()
+        self.image = pygame.transform.rotate(self.image, random.randint(-20, 20))
+
+        self.rect = self.image.get_rect()
+        self.rect.center = (random.randint(100, DISPLAY_WIDTH - 100),
+                            random.randint(60, DISPLAY_HEIGHT - 60))
+        self.floating_x = self.rect.x
+        self.floating_y = self.rect.y
+
+        if self.rect.centerx >= half_display_x:
+            self.dx = -random.randint(5, 25) / 100
+        else:
+            self.dx = random.randint(5, 25) / 100
+
+        if self.rect.centery >= half_display_y:
+            self.dy = -random.randint(5, 25) / 100
+        else:
+            self.dy = random.randint(5, 25) / 100
+
+        self.alpha = 0
+        self.max_alpha = 30
+
+        self.toggled = False
+
+        self.image.set_alpha(self.alpha)
+
+        self.timer.reset()
+        self.wait_timer.reset()
+
+    def update(self, dt):
+        if self.start_timer.update(dt):
+            if self.alpha < self.max_alpha and not self.toggled:
+                self.alpha += dt
+            else:
+                self.toggled = True
+
+        if self.toggled:
+            if self.timer.update(dt):
+                if self.alpha > 0:
+                    self.alpha -= dt
+                else:
+                    self.alpha = 0
+                    if self.wait_timer.update(dt):
+                        self.reset()
+
+        self.floating_x += self.dx * dt
+        self.floating_y += self.dy * dt
+        self.rect.topleft = (self.floating_x, self.floating_y)
+
+    def draw(self, display):
+        self.image.set_alpha(self.alpha)
+        if self.alpha:
+            display.blit(self.image, self.rect)
 
 
 # generic UI element
@@ -68,7 +207,10 @@ class UiElement(pygame.sprite.Sprite):
 
         self.selected = False
 
-    def update(self, col, row):
+    def update(self, dt, col, row):
+        self.check_selected(col, row)
+
+    def check_selected(self, col, row):
         self.selected = False
         if row == self.row and col == self.col:
             self.selected = True
@@ -104,28 +246,33 @@ class UiManager:
             self.master_ui_list.extend(val)
 
         self.x_index = 0
-        self.y_index = 0
+        self.y_index = 1
 
-    def update(self):
+        self.rooms = {}
+        self.room = 0
+
+    def update(self, dt):
         for ui in self.master_ui_list:
-            ui.update(self.x_index, self.y_index)
+            ui.update(dt, self.x_index, self.y_index)
 
     def change_col(self, val):
         self.x_index += val
-        if self.x_index >= len(self.master_ui_dict[self.y_index]):
-            self.change_row(1)
-            self.x_index = 0
-        elif self.x_index < 0:
-            self.change_row(-1)
         self.x_index %= len(self.master_ui_dict[self.y_index])
 
     def change_row(self, val):
         self.y_index += val
         self.y_index %= len(self.master_ui_dict)
+        self.x_index = 0
 
     def draw(self, display):
         for ui in self.master_ui_list:
             ui.draw(display)
+
+
+# game menu
+class GameMenu(pygame.sprite.Sprite):
+    def __init__(self):
+        pygame.sprite.Sprite.__init__(self)
 
 
 # game object
@@ -140,12 +287,17 @@ class Game(pygame.sprite.Sprite):
         self.angle = angle
 
         pygame.sprite.Sprite.__init__(self)
-        self.image = pygame.transform.scale(self.thumbnail, (150, 200))
+        self.original_image = pygame.transform.smoothscale(self.thumbnail, (225, 300))
+        self.image = pygame.transform.scale(self.original_image, (150, 200))
         self.rect = self.image.get_rect()
         self.rect.center = (x, y)
 
+        self.grow = self.image.get_width() - self.original_image.get_width()
+
         self.index = index
         self.selected = False
+
+        self.update(1, self.index, self.angle, True, [0, 0])
 
     def _init_metadata(self, configs):
         self.name = configs["name"]
@@ -155,55 +307,87 @@ class Game(pygame.sprite.Sprite):
         self.last_played_raw = configs["last_played_raw"]
         self.last_played = configs["last_played"]
 
-        self.exec_type = configs["exec_type"]
+        self.executable = configs["executable"]
+        self.exec_type = self.executable.split(".")[1]
         self.use_venv = configs["use_venv"]
         self.python_version = configs.get("python_version")
 
         self.thumbnail = load_thumbnail(os.path.join(self.root_path, configs["thumbnail"]), master_images["fail_load"])
 
-        self.executable = configs["executable"]
-
-    def update(self, index, angle):
+    def update(self, dt, index, angle, wheel_selected, scroll):
         current_angle = self.base_angle + math.radians(angle)
 
         # center rect based on wheel_ui pos
-        self.rect.midbottom = (int(math.cos(current_angle) * self.wheel_rect.width) + self.wheel_rect.centerx,
-                               int(math.sin(current_angle) * self.wheel_rect.height) + self.wheel_rect.centery + 40)
+        self.rect.midbottom = (int(math.cos(current_angle) * self.wheel_rect.width) + self.wheel_rect.centerx + scroll[0],
+                               int(math.sin(current_angle) * self.wheel_rect.height) + self.wheel_rect.centery + 40 + scroll[1])
 
         self.z_depth = math.sin(current_angle) + 2
 
-        if self.index == index:
+        if self.index == index and wheel_selected:
             self.selected = True
         else:
             self.selected = False
 
-    def execute(self):
-        return self.executable
+        self.scale_image(self.selected, dt)
+
+    def scale_image(self, selected, dt):
+        current_width = self.image.get_width()
+
+        if selected:
+            target_width = self.original_image.get_width()
+        else:
+            target_width = int(self.original_image.get_width() * 2/3)
+
+        orig_x, orig_y = self.original_image.get_size()
+
+        diff = abs(current_width - target_width)
+
+        if int(diff) != 0:
+            if diff > 1:
+                if current_width < target_width:
+                    self.grow += diff * 0.15 * dt
+                else:
+                    self.grow -= diff * 0.15 * dt
+                size_x = orig_x + round(self.grow)
+                size_y = int(size_x * 4 // 3)
+            else:
+                size_x = target_width
+                size_y = int(size_x * 4 // 3)
+            self.image = pygame.transform.smoothscale(self.original_image, (size_x, size_y))
+            self.image.set_colorkey(WHITE)
+            self.rect = self.image.get_rect(center=self.rect.center)
+
+    def prepare_executable(self):
+        if self.exec_type == "py":
+            if self.use_venv:
+                python_exec = os.path.join(self.root_path, ".venv", "Scripts" if not is_shugrpi else "bin", "python")
+            else:
+                python_exec = "python"
+            processes = [python_exec, self.executable]
+            return processes, self.root_path, os.environ.copy()
 
     def draw(self, display):
+        if self.selected:
+            pygame.draw.rect(display, WHITE,
+                             (self.rect.x - 3, self.rect.y - 3, self.rect.width + 6, self.rect.height + 6), 6)
         display.blit(self.image, self.rect)
 
 
 # game manager
 class GameManager:
     def __init__(self):
-        self.games = []
+        self.all_games_data = []
 
-        self.game_titles = []
-        self.sort_types = ["size", "last_played_raw"]
-
-    @staticmethod
-    def _setup_placeholder(path):
+    def _setup_placeholder(self, path):
         logger.warning(f"Valid game directory does not exist in {path}")
 
         os.makedirs(os.path.join(path, "placeholder"))
         with open(os.path.join(path, "placeholder", "main.py"), "w") as f:
             f.write('raise Exception("not a real game")')
 
-
         with open(os.path.join(path, "placeholder", "game_config.json"), "w") as f:
             pygame.image.save(load_image("placeholder_thumb.png"), os.path.join(path, "placeholder", "thumbnail.png"))
-            f.write('{"name": "Placeholder", "thumbnail": "thumbnail.png", "run_type": ".py", "use_venv": 0}')
+            f.write(json.dumps(DEFAULT_GAME_CONFIG))
 
         logger.info(f"Created game directory in {path}")
 
@@ -217,9 +401,6 @@ class GameManager:
         if len(all_dirs) <= 0:
             self._setup_placeholder(path)
             all_dirs = [d for d in os.listdir(path) if os.path.isdir(os.path.join(path, d))]
-
-        # temporary list for games' data
-        all_games_data = []
 
         # get all valid games
         for d in all_dirs:
@@ -268,24 +449,16 @@ class GameManager:
                 config_data["last_played"] = game_info["last_played"]
 
                 # add game/configuration to games
-                all_games_data.append(config_data)
+                self.all_games_data.append(config_data)
 
-        return all_games_data
-
-    def sort_games(self, sort_type, reversed=False):
-        """0 - size, 1 - last_played"""
-        if sort_type < len(self.sort_types):
-            sort_key = self.sort_types[sort_type]
-
-            games_copy = self.games.copy()
-            self.games = sorted(games_copy, key=lambda game: game.__dict__[sort_key], reverse=reversed)
-
-        return self.games
+        return self.all_games_data
 
 
 # game wheel object
-class GameWheelUi:
+class GameWheelUi(UiElement):
     def __init__(self, x, y, w, h, g):
+        UiElement.__init__(self, None, x, y, 1, 0)
+
         self.rect = pygame.Rect((x, y, w, h))
         self.rect.center = (x, y)
 
@@ -304,25 +477,84 @@ class GameWheelUi:
 
         # all games
         self.games = []
+        self.sort_types = ["name", "size", "last_played_raw"]
+        self.sort_index = 0
+        self.reverse_sort = False
 
         # get angles for even spacing
         self.item_angle = 0
         self.num_items = len(self.all_games_data)
         self.angle_increment = 360 / self.num_items if self.num_items > 0 else 0
 
+        self.reload_games()
+
+        # scroll values
+        self.scroll = [0, 0]
+        self.target_scroll = [0, 0]
+
+        self.setup_ellipses()
+
+        self.game_label = Text(str(self.games[self.master_index].name), half_display_x,
+                               DISPLAY_HEIGHT - 13, WHITE, 12, centered=True)
+
+    def setup_ellipses(self):
+        self.shadow_image = pygame.Surface(self.shadow_rect.size).convert_alpha()
+        temp_rect = self.shadow_image.get_rect()
+        self.shadow_image.set_colorkey(WHITE)
+        self.shadow_image.fill(WHITE)
+        pygame.draw.ellipse(self.shadow_image, (10, 10, 10), (0, 0, temp_rect.width, temp_rect.height))
+        self.shadow_image.set_alpha(40)
+
+        self.ellipse_image = pygame.Surface(self.shadow_rect.size).convert()
+        self.ellipse_image.set_colorkey((69, 69, 69))
+        self.ellipse_image.fill((69, 69, 69))
+
+        ellipse_rect = self.ellipse_image.get_rect()
+
+        for i in range(60):
+            temp_rect = (i*3, i, ellipse_rect.width - i*6, ellipse_rect.height - i*2)
+            pygame.draw.ellipse(self.ellipse_image, (i + 70, i + 70, i + 70), temp_rect, 3)
+
+    def reload_games(self):
         # add games to wheel
+        self.games = []
         for index, data in enumerate(self.all_games_data):
-            self.item_angle = math.radians(self.angle_increment * index + 90)
+            self.item_angle = math.radians(self.angle_increment * -index + 90)
             x = int(math.cos(self.item_angle) * self.rect.width) + self.rect.centerx
             y = int(math.sin(self.item_angle) * self.rect.height) + self.rect.centery
             self.games.append(Game(data, index, x, y, self.rect, self.item_angle))
 
-    def get_games(self):
-        return self.games
+        # reset angles and indices
+        self.master_index = 0
+        self.target_index = 0
+        self.master_angle = 0
+        self.target_angle = 0
 
-    def update(self, dt):
+    def sort_games(self):
+        """0 - name, 1 - size, 2 - last_played"""
+        self.sort_index += .5
+        self.reverse_sort = not self.reverse_sort
+        self.sort_index %= len(self.sort_types)
+
+        sort_key = self.sort_types[int(self.sort_index)]
+
+        games_data_copy = self.all_games_data.copy()
+        self.all_games_data = sorted(games_data_copy, key=lambda game: game[sort_key], reverse=self.reverse_sort)
+
+        self.reload_games()
+        self.game_label.set_text(self.games[self.master_index].name)
+
+    def prepare_game(self):
+        proc, path, env = self.games[self.master_index].prepare_executable()
+        return proc, path, env
+
+    def update(self, dt, col, row):
+        # check if selected
+        self.check_selected(col, row)
+
+        self.update_scroll(self.selected)
+
         # adjust target values
-        self.master_index = self.target_index
         self.target_angle = self.angle_increment * self.target_index
 
         # normalize target_angle to prevent floating-point overflow
@@ -342,20 +574,54 @@ class GameWheelUi:
         self.master_angle %= 360
 
         for game in self.games:
-            game.update(self.master_index, self.master_angle)
+            game.update(dt, self.master_index, self.master_angle, self.selected, self.scroll)
+
+    def update_scroll(self, selected):
+        if not selected:
+            self.target_scroll[1] = 15
+        else:
+            self.target_scroll[1] = 0
+
+        # x scroll
+        if self.scroll[0] != self.target_scroll[0]:
+            diff = (self.target_scroll[0] - self.scroll[0])
+            if abs(diff) > 1:
+                self.scroll[0] += diff * 0.15
+            else:
+                self.scroll[0] = self.target_scroll[0]
+
+        # y scroll
+        if self.scroll[1] != self.target_scroll[1]:
+            diff = (self.target_scroll[1] - self.scroll[1])
+            if abs(diff) > 1:
+                self.scroll[1] += diff * 0.15
+            else:
+                self.scroll[1] = self.target_scroll[1]
 
     def update_index(self, delta, audio_manager):
         self.target_index += delta
         self.target_index %= self.num_items
+        self.master_index = self.target_index
         audio_manager.play_sound("menu_swish", False)
+        self.game_label.set_text(self.games[self.master_index].name)
 
     def draw(self, display):
-        pygame.draw.ellipse(display, GRAY, self.shadow_rect)
-        sorted_sprites = sorted(self.games, key=lambda x: x.z_depth)
-        for sprite in [s for s in sorted_sprites if s.z_depth < 2.0]:
-            display.blit(sprite.image, sprite.rect)
-        for sprite in [s for s in sorted_sprites if s.z_depth >= 2.0]:
-            display.blit(sprite.image, sprite.rect)
+        display.blit(self.shadow_image, (self.shadow_rect.x + self.scroll[0], self.shadow_rect.y + 15))
+        for i in range(15):
+            temp_rect = (self.shadow_rect.x + self.scroll[0] + i*2 + 1, min(self.shadow_rect.y + i + self.scroll[1] + 1, self.shadow_rect.y + 16),
+                         self.shadow_rect.width - i*4 - 2, self.shadow_rect.height - 2)
+            pygame.draw.ellipse(display, (60, 60, 60), temp_rect, 1)
+
+        display.blit(self.ellipse_image, (self.shadow_rect.x + self.scroll[0], self.shadow_rect.y + self.scroll[1]))
+
+        sorted_games = sorted(self.games, key=lambda x: x.z_depth)
+        for game in [s for s in sorted_games if s.z_depth < 2.0]:
+            game.draw(display)
+        for game in [s for s in sorted_games if s.z_depth >= 2.0]:
+            game.draw(display)
+
+        if self.selected:
+            self.game_label.draw(display)
 
 
 # main SHUGRPi OS app
@@ -363,19 +629,18 @@ class ShugrPiOS:
     def __init__(self, is_shugrpi, master_images):
         """ Master class for the SHUGRPi Operating System """
         self.is_shugrpi = is_shugrpi
-        logger.info(f"Running on SHUGRPi: {'yes' if is_shugrpi else 'no'}")
 
         """ window/display setup """
         self.screen = screen
         self.display = pygame.Surface((DISPLAY_WIDTH, DISPLAY_HEIGHT)).convert()
         pygame.display.set_icon(master_images["icon"])
         self.display_info = pygame.display.Info()
-        logger.info("Video Driver: " + pygame.display.get_driver().capitalize())
-        logger.info("Initialized display")
+        logger.info("Using video driver: " + pygame.display.get_driver())
 
         """ time setup """
         self.clock = pygame.time.Clock()
         self.timers = {}
+        self.pause = False
 
         """ manager setup """
         self.am = AudioManager(logger, self.is_shugrpi)
@@ -403,56 +668,95 @@ class ShugrPiOS:
         """ games setup """
         self.master_games_path = os.path.join(base_path, GAME_PATH)
         all_games_data = self.gm.load_games(self.master_games_path)
-        self.game_wheel = GameWheelUi(half_display_x, half_display_y + 60, 175, 55, all_games_data)
+        self.game_wheel = GameWheelUi(half_display_x, half_display_y + 60, 180, 60, all_games_data)
+
+        """ UI setup """
+        UiElement("10:34", 50, 10, 0, 0, 10)
+        UiElement("85%", 600, 10, 0, 1, 10)
+        UiElement(".!|", 700, 10, 0, 2, 10)
+
+        self.banner_top = pygame.Surface((DISPLAY_WIDTH, 60)).convert()
+        self.banner_top.fill(GRAY)
+        self.banner_top_rect = self.banner_top.get_rect()
+        self.banner_top_rect.midtop = (half_display_x, -30)
+
+        self.banner_bottom = pygame.Surface((DISPLAY_WIDTH, 30)).convert()
+        self.banner_bottom.fill(GRAY)
+        self.banner_bottom_rect = self.banner_bottom.get_rect()
+        self.banner_bottom_rect.midbottom = (half_display_x, DISPLAY_HEIGHT)
+
+        self.um = UiManager(ui_group)
+
+        """ effects setup """
+        self.curtain = Curtain()
+        self.curtain.set_color(DARKER_GRAY)
+        self.floating_logo = FloatingLogo()
 
         """ master phase variable """
-        self.master_phase = -1
-        self.dt = 1
+        self.master_phase = -2
+        self.timers["pre_init"] = Timer(60)
 
         """ master running variable """
         self.running = True
+        self.running_game = None
+        self.start_game = False
 
-    def update_internet_connection(self):
-        try:
-            while not self.stop_event.wait(3):
-                with self.wifi_lock:
-                    self.internet_connection = check_internet_status()
-        except Exception as e:
-            logger.error(f"Failed to update internet status: {e}")
-
-    def check_for_updates(self):
-        pass
-
-    def run_updates(self):
-        pass
-
-    def sort_games(self, sort_type, reversed=False):
-        self.games = self.gm.sort_games(sort_type, reversed)
-
+    """ main runner """
     def run(self):
-        while self.running:
-            self.update()
-            self.events()
-            self.draw()
+        global window_title
 
-            try:
-                pass
-            except (Exception, KeyboardInterrupt) as e:
-                if isinstance(e, Exception):
-                    logger.error(f"SHUGRPi has crashed due to the following error: {e}")
-                self.shutdown()
+        time_accum = 0
+        step = 0
+        try:
+            while self.running:
+                if not self.pause:
+                    # tick clock
+                    dt = self.clock.tick(FPS) / 1000.0 * 60
+                    time_accum += dt
+                    step = 0
 
-    def update(self):
-        # tick clock
-        raw_dt = self.clock.tick(FPS) / 1000.0 * 60
+                    # update curtain first
+                    self.curtain.update(dt)
 
-        self.dt = self.dt * 0.9 + raw_dt * 0.1
-        dt = self.dt
+                    while time_accum >= 1 and step <= 50:
+                        self.update(1)
+                        time_accum -= 1
+                        step += 1
 
+                    self.events(self.master_phase)
+                    self.draw()
+
+                # while game is running
+                if self.running_game:
+                    # keep app minimally responsive to avoid breakage
+                    pygame.event.get()
+
+                    if self.running_game.poll() is not None:
+                        stderr = self.running_game.stderr.read()
+                        self.running_game = False
+                        self.pause = False
+                        self.curtain.target_alpha = 0
+                        self.clock.tick(FPS)
+
+        except (Exception, KeyboardInterrupt) as e:
+            if isinstance(e, Exception):
+                error_msg = f"SHUGRPi has crashed due to the following error: {e}"
+                logger.error(error_msg)
+                pygame.display.message_box(window_title, error_msg, "error")
+            self.shutdown()
+
+    """ main loop """
+    def update(self, dt):
+        # dummy screen (to absorb initial dt spikes)
+        if self.master_phase == -2:
+            if self.timers["pre_init"].update(dt) or dt < 1:
+                self.switch_phase(-1, dt)
+
+        # logo screen
         if self.master_phase == -1:
             if not self.timers["start"].update(dt):
                 if self.logo_alpha < 255:
-                    self.logo_alpha += 5 * min(dt, 1)
+                    self.logo_alpha += 5 * dt
                 else:
                     self.logo_alpha = 255
                     self.am.play_sound("logo")
@@ -464,54 +768,135 @@ class ShugrPiOS:
                         self.logo_alpha = 0
                 else:
                     if self.logo_alpha == 0:
-                        self.master_phase = 0
+                        self.switch_phase(0, dt, True)
                         self.logo_alpha = 0
                         logger.info("Finished initializing ShugrPi OS")
                         logger.info("Running main loop")
 
+        # main menu
         elif self.master_phase == 0:
-            self.game_wheel.update(dt)
+            self.floating_logo.update(dt)
 
-    def events(self):
-        global FPS
+            self.um.update(dt)
+
+            if self.start_game:
+                if self.curtain.flip:
+                    self.execute_game()
+
+
+    def events(self, phase):
         # handle events
         for event in pygame.event.get():
-            if event.type == pygame.QUIT:
+
+            # shutdown
+            if event.type == pygame.QUIT or (event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE):
                 self.shutdown()
+
             if event.type == pygame.KEYDOWN:
-                # shutdown
-                if event.key == pygame.K_ESCAPE:
-                    self.shutdown()
-                if event.key == pygame.K_SPACE:
-                    self.test()
-                if event.key == pygame.K_RETURN:
-                    FPS = 30
-            if event.type == pygame.KEYUP:
-                if event.key == pygame.K_RETURN:
-                    FPS = 60
+                if phase == -2:
+                    phase = -1
+                    self.timers["start"].finished = True
+
+                if phase == -1:
+                    self.timers["start"].finished = True
+
+                elif phase == 0:
+                    if event.key == pygame.K_UP:
+                        self.um.change_row(-1)
+                    if event.key == pygame.K_DOWN:
+                        self.um.change_row(1)
+                    if self.game_wheel.selected:
+                        if event.key == pygame.K_LEFT:
+                            self.game_wheel.update_index(-1, self.am)
+                        if event.key == pygame.K_RIGHT:
+                            self.game_wheel.update_index(1, self.am)
+                        if event.key == pygame.K_RSHIFT:
+                            self.game_wheel.sort_games()
+                        if event.key == pygame.K_RETURN:
+                            self.fade_to_game()
+                    else:
+                        if event.key == pygame.K_LEFT:
+                            self.um.change_col(-1)
+                        if event.key == pygame.K_RIGHT:
+                            self.um.change_col(1)
 
     def draw(self):
-        if self.master_phase == -1:
+        self.screen.fill(DARKER_GRAY)
+
+        # dummy screen
+        if self.master_phase == -2:
+            self.display.fill(DARKER_GRAY)
+
+        # logo screen
+        elif self.master_phase == -1:
             self.display.fill(DARKER_GRAY)
             self.logo_img.set_alpha(int(self.logo_alpha))
             self.display.blit(self.logo_img, (
             half_display_x - self.logo_img.get_width() // 2, half_display_y - self.logo_img.get_height() // 2))
 
+        # main menu
         elif self.master_phase == 0:
-            # fill screen with dark gray
             self.display.fill(DARK_GRAY)
 
-            self.game_wheel.draw(self.display)
+            self.floating_logo.draw(self.display)
+
+            self.display.blit(self.banner_top, (self.banner_top_rect.x, self.banner_top_rect.y))
+            self.display.blit(self.banner_bottom, (self.banner_bottom_rect.x, self.banner_bottom_rect.y))
+
+            for ui in ui_group:
+                ui.draw(self.display)
+
+            self.curtain.draw(self.display)
 
         self.screen.blit(pygame.transform.scale(self.display, self.screen.get_size()), (0, 0))
         pygame.display.flip()
 
+    """ game utilities """
+    def sort_games(self, sort_type, reversed=False):
+        self.games = self.gm.sort_games(sort_type, reversed)
+
+    def fade_to_game(self):
+        self.curtain.set_color(DARK_GRAY)
+        self.curtain.target_alpha = 255
+        self.start_game = True
+
+    def execute_game(self):
+        proc, path, env = self.game_wheel.prepare_game()
+
+        self.running_game = subprocess.Popen(proc, cwd=path, env=env, stderr=subprocess.PIPE, text=True)
+        self.start_game = False
+        self.pause = True
+
+    """ various utilities """
     def get_image(self, img):
         try:
             return master_images[img]
         except:
             return master_images["fail_load_alt"]
 
+    def switch_phase(self, new_phase, dt, fade=False):
+        if fade:
+            if self.master_phase != new_phase:
+                self.curtain.target_alpha = 255
+                if self.curtain.flip:
+                    self.master_phase = new_phase
+                    self.am.reset_sounds()
+                    self.curtain.target_alpha = 0
+        else:
+            if self.master_phase != new_phase:
+                self.master_phase = new_phase
+                self.am.reset_sounds()
+
+    """ threaded utilities """
+    def update_internet_connection(self):
+        try:
+            while not self.stop_event.wait(3):
+                with self.wifi_lock:
+                    self.internet_connection = check_internet_status()
+        except Exception as e:
+            logger.error(f"Failed to update internet status: {e}")
+
+    """ main shutdown """
     def shutdown(self):
         logger.info("Shutting down...")
         self.running = False
@@ -520,9 +905,6 @@ class ShugrPiOS:
         self.wifi_thread.join()
         logger.info("Shutdown complete!")
         sys.exit()
-
-    def test(self):
-        self.game_wheel.update_index(1, self.am)
 
 
 # start up SHUGRPi OS

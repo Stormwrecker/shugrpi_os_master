@@ -58,11 +58,6 @@ import json
 import math
 from socket import gethostbyname, gethostname
 
-# import RPi.GPIO if available
-try:
-    import RPi.GPIO as GPIO
-except ImportError:
-    GPIO = None
 
 # set up pygame
 pygame.init()
@@ -73,6 +68,7 @@ try:
 except pygame.error as e:
     sound_working = False
     logger.error(f"Initializing pygame.mixer failed; No sound available; {e}")
+
 
 # setup window and display sizes
 display_width, display_height = (800, 480)
@@ -101,8 +97,10 @@ is_major_scroll = False
 
 # handy tools
 def load_asset(kind, path, flag=False):
-    global logger
     """0: image, 1: sound, 2: font, 3: music, 4: other"""
+
+    global logger
+
     try:
         # image
         if kind == 0:
@@ -401,6 +399,32 @@ class WheelItem(pygame.sprite.Sprite):
             self.rect = self.image.get_rect(midbottom=self.rect.midbottom)
 
 
+"""ClockSetter object"""
+class ClockSetter:
+    def __init__(self):
+        self.x = half_display_x
+        self.y = half_display_y - display_height
+        self.width = 250
+        self.height = 100
+        self.rect = pygame.Rect((self.x, self.y, self.width, self.height))
+        self.rect.center = (self.x, self.y)
+        self.options = ["Hour", "Minute"]
+        self.twenty_four_hour = False
+        self.index = 0
+        self.opt_x = [self.rect.left, self.rect.right]
+
+    def render(self, display):
+        for index, option in enumerate(self.options):
+            color = YELLOW if index == self.index else WHITE
+            draw_text(display, option, self.opt_x[index], self.rect.top - 20, color, 20, centered=True)
+        self.rect.y = self.y + major_scroll
+        pygame.draw.rect(display, RED, self.rect, 2)
+
+    def update_time(self):
+        if is_shugr_pi:
+            pass
+
+
 """Sub-menu for executing a game"""
 class SubMenu:
     def __init__(self, game):
@@ -653,11 +677,14 @@ class ShugrPiOS:
         self.played_sound = False
 
         self.menu_swish_fx = load_asset(1, "audio/menu_swish.wav")
-        self.menu_swish_fx.set_volume(.4)
+        if self.menu_swish_fx:
+            self.menu_swish_fx.set_volume(.4)
         self.menu_up_fx = load_asset(1, "audio/menu_up.wav")
-        self.menu_up_fx.set_volume(.2)
+        if self.menu_up_fx:
+            self.menu_up_fx.set_volume(.2)
         self.menu_down_fx = load_asset(1, "audio/menu_down.wav")
-        self.menu_down_fx.set_volume(.2)
+        if self.menu_down_fx:
+            self.menu_down_fx.set_volume(.2)
         load_asset(3, "audio/shugr_pi_bg.mp3")
         pygame.mixer.music.set_volume(.2)
         self.sfx_channel = pygame.mixer.Channel(1)
@@ -708,6 +735,10 @@ class ShugrPiOS:
         self.update_os_thread.start()
         self.update_menu = UpdateMenu()
         self.is_updating = False
+
+        # clock menu
+        self.display_time = time.strftime("%H:%M").split(":")
+        self.clock_setter = ClockSetter()
 
     def setup_placeholder(self):
         logger.warning("'games' directory does not exist")
@@ -930,6 +961,9 @@ class ShugrPiOS:
                     temp_rect = self.wheel.get_bottom_item().rect
                     pygame.draw.rect(self.display, WHITE, (temp_rect.centerx - int(temp_rect.width // 2), temp_rect.centery - int(temp_rect.height // 2), int(temp_rect.width), int(temp_rect.height)), 3)
 
+                # draw clock setter
+                self.clock_setter.render(self.display)
+
                 # draw sub-menu
                 self.title_index = abs(len(self.games) - 1 - self.game_index) + 1
                 self.title_index %= len(self.games)
@@ -949,7 +983,7 @@ class ShugrPiOS:
                 # draw banner items
                 self.wifi_image = self.wifi_images[self.internet_connection]
                 self.display.blit(self.wifi_image, (display_width - 120, 2 + major_scroll))
-                draw_text(self.display, time.strftime("%H:%M") if not self.toggle_clock else time.strftime("%I:%M"), 45, self.banner_top_rect.y + int(self.banner_top_rect.height * .75) + major_scroll, WHITE, 13, centered=True)
+                draw_text(self.display, time.strftime("%H:%M"), 45, self.banner_top_rect.y + int(self.banner_top_rect.height * .75) + major_scroll, WHITE, 13, centered=True)
 
                 # draw battery
                 if is_ce:
@@ -1268,7 +1302,7 @@ class ShugrPiOS:
 
     def execute_game(self, game_folder):
         self.game_path = os.path.abspath(os.path.join(PATH, game_folder))
-        self.main_app = os.path.join(self.game_path, f"main{self.games[game_folder]['run_type']}")
+        self.main_app = os.path.join(self.game_path, f"main.py")
         self.venv = None
         # check if using a local venv
         if self.games[game_folder]['use_venv']:
@@ -1285,7 +1319,7 @@ class ShugrPiOS:
                 self.install_menu.index = 0
 
         if self.sub_phase != 2:
-            logger.info(f"Started '{self.titles[self.title_index]}' as `main{self.games[game_folder]['run_type']}`")
+            logger.info(f"Started '{self.titles[self.title_index]}' as `main.py`")
             self.started_game = True
 
     def run_game(self):
