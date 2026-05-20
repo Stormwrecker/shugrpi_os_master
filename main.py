@@ -671,7 +671,7 @@ class ShugrPiOS:
         self.bg_logo = BGLogo(self.big_logo_img)
 
         # super amazing sound effects (crucial for the Shugr Pi)
-        self.logo_sfx = load_asset(1, "audio/shugr_pi_alt.wav")
+        self.logo_sfx = load_asset(1, "audio/shugrpi_alt.wav")
         if self.logo_sfx:
             self.logo_sfx.set_volume(.75)
         self.played_sound = False
@@ -685,7 +685,7 @@ class ShugrPiOS:
         self.menu_down_fx = load_asset(1, "audio/menu_down.wav")
         if self.menu_down_fx:
             self.menu_down_fx.set_volume(.2)
-        load_asset(3, "audio/shugr_pi_bg.mp3")
+        load_asset(3, "audio/shugrpi_bg.mp3")
         pygame.mixer.music.set_volume(.2)
         self.sfx_channel = pygame.mixer.Channel(1)
         self.sfx_channel.set_volume(.7)
@@ -1377,7 +1377,7 @@ class ShugrPiOS:
                 self.screen_text = ""
                 if sound_working:
                     pygame.mixer.init(frequency=48000, size=-16, channels=2, buffer=2048)
-                    load_asset(3, "audio/shugr_pi_bg.mp3")
+                    load_asset(3, "audio/shugrpi_bg.mp3")
                     pygame.mixer.music.set_volume(.2)
                     pygame.mixer.music.play(-1, fade_ms=3000)
 

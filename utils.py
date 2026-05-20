@@ -102,14 +102,29 @@ class AudioManager:
     def _get_sound_path(self, path):
         return os.path.join(base_path, "audio", path + ".wav")
 
+    def _get_music_path(self, path):
+        return os.path.join(base_path, "audio", path + ".mp3")
+
     def _load_sounds(self):
-        self.master_sounds["logo"] = [pygame.mixer.Sound(self._get_sound_path("shugr_pi_alt")), .75, False]
-        self.master_sounds["menu_swish"] = [pygame.mixer.Sound(self._get_sound_path("menu_swish")), .4, False]
+        self.master_sounds["logo"] = [pygame.mixer.Sound(self._get_sound_path("shugrpi_alt")), .75, False]
+        self.master_sounds["menu_swish"] = [pygame.mixer.Sound(self._get_sound_path("menu_swish")), .2, False]
+        self.master_sounds["menu_up"] = [pygame.mixer.Sound(self._get_sound_path("menu_up")), .2, False]
+        self.master_sounds["menu_down"] = [pygame.mixer.Sound(self._get_sound_path("menu_down")), .2, False]
 
     def _load_musics(self):
-        pass
+        self.master_music_tracks["shugrpi_bg"] = [self._get_music_path("shugrpi_bg"), .2]
 
-    def play_sound(self, sound, in_loop=True):
+    def play_music(self, music):
+        pygame.mixer.music.fadeout(1000)
+
+        pygame.mixer.music.load(self.master_music_tracks[music][0])
+        pygame.mixer.music.set_volume(self.master_music_tracks[music][1])
+        pygame.mixer.music.play(-1, fade_ms=500)
+
+    def stop_music(self):
+        pygame.mixer.music.fadeout(500)
+
+    def play_sound(self, sound, in_loop=False):
         if not self.master_sounds[sound][2]:
             self.master_sounds[sound][0].set_volume(self.master_sounds[sound][1])
             self.master_sounds[sound][0].play(0)
@@ -156,7 +171,8 @@ def load_thumbnail(thumb_path, fail_image):
     try:
         return pygame.image.load(thumb_path).convert()
     except:
-        logger.warning(f"unable to locate '{thumb_path}'")
+        if thumb_path is not None:
+            logger.warning(f"unable to load thumbnail from '{thumb_path}'")
         return fail_image
 
 

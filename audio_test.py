@@ -114,7 +114,7 @@ while run:
             run = False
             break
         if event.type == pygame.KEYDOWN:
-            pygame.mixer.Sound("audio/shugr_pi.wav").play()
+            pygame.mixer.Sound("audio/shugrpi.wav").play()
 
     # render display
     screen.blit(pygame.transform.scale(display, screen.get_size()), (0, 0))

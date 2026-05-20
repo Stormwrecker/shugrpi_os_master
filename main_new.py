@@ -63,9 +63,11 @@ def init_pygame():
             except pygame.error as e:
                 logger.error("No audio drivers available")
 
+    return pygame.mixer.get_driver()
+
 
 # initialize pygame
-init_pygame()
+audio_driver = init_pygame()
 
 # create window
 flags = NOFRAME | FULLSCREEN | SCALED if is_shugrpi else NOFRAME
@@ -194,21 +196,29 @@ class FloatingLogo(pygame.sprite.Sprite):
 
 # generic UI element
 class UiElement(pygame.sprite.Sprite):
-    def __init__(self, label, x, y, row, col, padding=8):
-        pygame.sprite.Sprite.__init__(self, ui_group)
+    def __init__(self, label, x, y, row, col, size=8, group=None, func=None):
+        if group is None:
+            pygame.sprite.Sprite.__init__(self, ui_group)
+        else:
+            pygame.sprite.Sprite.__init__(self, group)
         self.row = row
         self.col = col
 
         pre_rect = pygame.Rect((x, y, 10, 10))
 
-        self.text = Text(label, pre_rect.centerx, pre_rect.centery, WHITE, padding, centered=True)
+        self.text = Text(label, pre_rect.centerx, pre_rect.centery, WHITE, size, centered=True)
         r = self.text.rect
-        self.rect = pygame.Rect((r.x - padding//2, r.y - padding//2, r.width + padding, r.height + padding))
+        self.rect = pygame.Rect((r.x - size//2, r.y - size//2, r.width + size, r.height + size))
+
+        self.original_pos = self.rect.topleft
 
         self.selected = False
 
+        self.func = func
+
     def update(self, dt, col, row):
         self.check_selected(col, row)
+        self.text.rect.center = self.rect.center
 
     def check_selected(self, col, row):
         self.selected = False
@@ -216,7 +226,8 @@ class UiElement(pygame.sprite.Sprite):
             self.selected = True
 
     def action(self):
-        pass
+        if self.func is not None:
+            self.func()
 
     def draw(self, display):
         if self.selected:
@@ -246,10 +257,7 @@ class UiManager:
             self.master_ui_list.extend(val)
 
         self.x_index = 0
-        self.y_index = 1
-
-        self.rooms = {}
-        self.room = 0
+        self.y_index = 0
 
     def update(self, dt):
         for ui in self.master_ui_list:
@@ -264,6 +272,10 @@ class UiManager:
         self.y_index %= len(self.master_ui_dict)
         self.x_index = 0
 
+    def action(self):
+        self.master_ui_dict[self.y_index][self.x_index].action()
+        return self.master_ui_dict[self.y_index][self.x_index]
+
     def draw(self, display):
         for ui in self.master_ui_list:
             ui.draw(display)
@@ -271,8 +283,118 @@ class UiManager:
 
 # game menu
 class GameMenu(pygame.sprite.Sprite):
-    def __init__(self):
+    def __init__(self, am, start_game_action):
         pygame.sprite.Sprite.__init__(self)
+        self.height = 380
+        self.width = int(self.height * 4 // 3)
+
+        self.image = pygame.Surface((self.width, self.height)).convert()
+        self.image.fill((50, 50, 50))
+
+        self.x = DISPLAY_WIDTH + 10
+        self.y = half_display_y
+        self.main_rect = self.image.get_rect()
+        self.main_rect.midleft = (self.x, self.y)
+
+        self.page_image = pygame.Surface((self.width * 2, self.height // 2 + 40)).convert()
+        self.page_image.fill((60, 60, 60))
+        self.page_image.set_colorkey(BLACK)
+        pygame.draw.polygon(self.page_image, BLACK, [[0, 0], [70, 0], [0, self.height // 2 - 30]])
+
+        self.page_rect = self.page_image.get_rect()
+        self.page_rect.topleft = (self.main_rect.x + 40, self.main_rect.y + self.height // 2 + 40)
+
+        self.page_shadow = pygame.Surface((self.width * 2, self.height // 2 + 40)).convert()
+        self.page_shadow.fill((30, 30, 30))
+        self.page_shadow.set_colorkey(BLACK)
+        pygame.draw.polygon(self.page_shadow, BLACK, [[0, 0], [70, 0], [0, self.height // 2 - 30]])
+
+        self.page_shadow_rect = self.page_shadow.get_rect()
+        self.page_shadow_rect.topleft = self.page_rect.topleft
+
+        self.game = None
+        self.label = Text("", 0, 0, WHITE, 0)
+
+        self.selected = False
+        self.scroll = [0, 0]
+        self.target_scroll = [0, 0]
+
+        self.x_scroll_bounds = [0, -300]
+        self.toggled = False
+
+        self.am = am
+
+        self.ui_group = pygame.sprite.Group()
+        self.options = {"Start Game":start_game_action, "Settings":None, "Back": self.toggle}
+        self.all_option_data = zip(range(len(self.options)), self.options.keys(), self.options.values())
+
+        for index, option, action in list(self.all_option_data):
+            UiElement(option, self.page_rect.x, self.page_rect.y - 65 + (index * 70),
+                      index, 0, size=14, group=self.ui_group, func=action)
+
+        self.um = UiManager(self.ui_group)
+
+    def _get_label(self, game):
+        display_name = game or ""
+        default_name = DEFAULT_GAME_CONFIG["name"]
+        if len(display_name.split()) > 2:
+            if display_name != default_name:
+                target_character = display_name.find(" ", 9)
+            else:
+                target_character = display_name.find(" ", 7)
+            display_name = display_name[0:target_character] + "\n" + display_name[target_character + 1:]
+        temp_size = 30 if len(display_name) <= 10 else 20
+
+        return Text(display_name, self.main_rect.x + 40, self.main_rect.top + 30, WHITE, temp_size)
+
+    def update(self, dt):
+        diff = (self.target_scroll[0] - self.scroll[0])
+        if abs(diff) > 1:
+            self.scroll[0] += diff * 0.15 * dt
+        else:
+            self.scroll[0] = self.target_scroll[0]
+
+        self.main_rect.x = self.x + self.scroll[0]
+        self.main_rect.centery = self.y + self.scroll[1]
+
+        self.page_rect.x = self.main_rect.x + 80 + self.scroll[0] // 3
+        self.page_rect.y = self.main_rect.y + self.height // 3
+
+        self.page_shadow_rect.x = self.main_rect.x + 84 + self.scroll[0] // 3
+        self.page_shadow_rect.y = self.main_rect.y + 4 + self.height // 3
+
+        for index, ui in enumerate(self.um.ui_group):
+            ui.rect.x = self.page_rect.x + 120 - (index * 30)
+        self.um.update(dt)
+
+        self.label.rect.topleft = (self.main_rect.x + 35, self.main_rect.top + 30)
+
+    def toggle(self):
+        self.toggled = not self.toggled
+        if self.toggled:
+            self.am.play_sound("menu_up")
+            self.label = self._get_label(self.game)
+            self.um.x_index = 0
+            self.um.y_index = 0
+        else:
+            self.am.play_sound("menu_down")
+        self.target_scroll[0] = self.x_scroll_bounds[self.toggled]
+
+    def action(self):
+        ui = self.um.action()
+        toggled = False
+        if ui.row == 2:
+            toggled = True
+        return toggled
+
+    def draw(self, display):
+        display.blit(self.image, self.main_rect)
+        display.blit(self.page_shadow, self.page_shadow_rect)
+        display.blit(self.page_image, self.page_rect)
+
+        self.label.draw(display)
+
+        self.um.draw(display)
 
 
 # game object
@@ -309,10 +431,13 @@ class Game(pygame.sprite.Sprite):
 
         self.executable = configs["executable"]
         self.exec_type = self.executable.split(".")[1]
-        self.use_venv = configs["use_venv"]
+        self.use_venv = configs.get("use_venv")
         self.python_version = configs.get("python_version")
-
-        self.thumbnail = load_thumbnail(os.path.join(self.root_path, configs["thumbnail"]), master_images["fail_load"])
+        if configs.get("thumbnail"):
+            temp_thumb = os.path.join(self.root_path, configs["thumbnail"])
+        else:
+            temp_thumb = None
+        self.thumbnail = load_thumbnail(temp_thumb, master_images["fail_load"])
 
     def update(self, dt, index, angle, wheel_selected, scroll):
         current_angle = self.base_angle + math.radians(angle)
@@ -365,6 +490,8 @@ class Game(pygame.sprite.Sprite):
                 python_exec = "python"
             processes = [python_exec, self.executable]
             return processes, self.root_path, os.environ.copy()
+        else:
+            return self.executable, self.root_path, os.environ.copy()
 
     def draw(self, display):
         if self.selected:
@@ -377,6 +504,7 @@ class Game(pygame.sprite.Sprite):
 class GameManager:
     def __init__(self):
         self.all_games_data = []
+        self.log_data = []
 
     def _setup_placeholder(self, path):
         logger.warning(f"Valid game directory does not exist in {path}")
@@ -402,8 +530,17 @@ class GameManager:
             self._setup_placeholder(path)
             all_dirs = [d for d in os.listdir(path) if os.path.isdir(os.path.join(path, d))]
 
+        # padding
+        self.padding = 0
+        self.paddings = []
+
         # get all valid games
         for d in all_dirs:
+
+            # flags for logging
+            is_valid = False
+            is_config = False
+
             # possible game paths
             main_game_py = os.path.join(path, d, "main.py")
             main_game_bin = os.path.join(path, d, "main.bin")
@@ -415,6 +552,13 @@ class GameManager:
             elif os.path.exists(main_game_bin):
                 game_app = main_game_bin
             else:
+                # set padding
+                self.padding = max(self.padding, len(d))
+                self.paddings.append(len(d))
+
+                # add folder to log
+                self.log_data.append(f"|  {d}^{is_valid}+{is_config}   |")
+
                 continue
 
             # configuration data for games
@@ -422,22 +566,24 @@ class GameManager:
 
             # if a valid game is encountered
             if game_app:
-                logger.info(f"Detected valid game: '{d}'")
+                is_valid = True
 
                 # get config file
                 config_file = os.path.join(path, d, "game_config.json")
 
                 # if file does not exist, make one
                 if not os.path.exists(config_file):
-                    logger.error(f"'{d}' configurations do not exist; Reverting to default")
                     with open(config_file, "w") as f:
                         json.dump(DEFAULT_GAME_CONFIG, f)
 
                 # if file does exist, read it
                 else:
-                    logger.info(f"Detected configurations in '{d}'")
                     with open(config_file, "r") as f:
                         config_data = json.load(f)
+
+                # check if configurations are custom
+                if config_data != DEFAULT_GAME_CONFIG:
+                    is_config = True
 
                 # set configurations
                 config_data["root_path"] = os.path.join(path, d)
@@ -448,10 +594,35 @@ class GameManager:
                 config_data["last_played_raw"] = game_info["last_played_raw"]
                 config_data["last_played"] = game_info["last_played"]
 
+                # set padding
+                self.padding = max(self.padding, len(d))
+                self.paddings.append(len(d))
+
                 # add game/configuration to games
                 self.all_games_data.append(config_data)
 
+            # add data to log table
+            self.log_data.append(f"|  {d}^{is_valid} +{is_config}   " + (" |" if is_config else "|"))
+
+        # generate summary table in logging
+        self._generate_log_table()
+
         return self.all_games_data
+
+    def _generate_log_table(self):
+        for i, log in enumerate(self.log_data.copy()):
+            step_0 = log
+            step_1 = step_0.replace("^", " " * (26 - self.paddings[i]))
+            self.log_data[i] = step_1.replace("+", " " * 8)
+
+        header = "----Folder" + "-" * (self.padding - 2) + "Game" + "-" * 8 + "Config----"
+        logger.info("Detected the folders listed below:".center(len(header)))
+        logger.info(header)
+
+        for log in self.log_data:
+            logger.info(log)
+
+        logger.info("-" * len(header))
 
 
 # game wheel object
@@ -471,6 +642,7 @@ class GameWheelUi(UiElement):
         self.master_angle = 0
         self.target_angle = 0
         self.bottom_angle = math.radians(90)
+        self.lowest_game = None
 
         # get games' data
         self.all_games_data = g
@@ -497,6 +669,19 @@ class GameWheelUi(UiElement):
         self.game_label = Text(str(self.games[self.master_index].name), half_display_x,
                                DISPLAY_HEIGHT - 13, WHITE, 12, centered=True)
 
+        self.selected = [True, True]
+
+        self.curtain = pygame.Surface((1, 1), pygame.SRCALPHA)
+        self.curtain = pygame.transform.scale(self.curtain, (screen.get_width(), screen.get_height() - 60)).convert()
+        self.curtain_rect = self.curtain.get_rect()
+        self.curtain_rect.topleft = (0, 30)
+
+        self.curtain.set_colorkey(WHITE)
+        self.curtain.fill(DARKER_GRAY)
+
+        self.curtain_alpha = 0
+        self.curtain.set_alpha(self.curtain_alpha)
+
     def setup_ellipses(self):
         self.shadow_image = pygame.Surface(self.shadow_rect.size).convert_alpha()
         temp_rect = self.shadow_image.get_rect()
@@ -516,6 +701,13 @@ class GameWheelUi(UiElement):
             pygame.draw.ellipse(self.ellipse_image, (i + 70, i + 70, i + 70), temp_rect, 3)
 
     def reload_games(self):
+        # reset angles and indices
+        self.master_index = 0
+        self.target_index = 0
+        self.master_angle = 0
+        self.target_angle = 0
+        self.lowest_game = None
+
         # add games to wheel
         self.games = []
         for index, data in enumerate(self.all_games_data):
@@ -524,13 +716,7 @@ class GameWheelUi(UiElement):
             y = int(math.sin(self.item_angle) * self.rect.height) + self.rect.centery
             self.games.append(Game(data, index, x, y, self.rect, self.item_angle))
 
-        # reset angles and indices
-        self.master_index = 0
-        self.target_index = 0
-        self.master_angle = 0
-        self.target_angle = 0
-
-    def sort_games(self):
+    def sort_games(self, am):
         """0 - name, 1 - size, 2 - last_played"""
         self.sort_index += .5
         self.reverse_sort = not self.reverse_sort
@@ -544,15 +730,56 @@ class GameWheelUi(UiElement):
         self.reload_games()
         self.game_label.set_text(self.games[self.master_index].name)
 
+        am.play_sound("menu_swish")
+
     def prepare_game(self):
         proc, path, env = self.games[self.master_index].prepare_executable()
         return proc, path, env
 
+    def get_lowest_game(self):
+        # Find which item is currently closest to bottom position
+        closest_game = None
+        min_diff = float('inf')
+
+        for game in self.games:
+            # Calculate angle difference from bottom position
+            game_angle = (game.angle + math.radians(self.master_angle)) % (2 * math.pi)
+            diff = abs(game_angle - self.bottom_angle)
+
+            # Take shortest path around circle
+            if diff > math.pi:
+                diff = 2 * math.pi - diff
+
+            if diff < min_diff:
+                min_diff = diff
+                closest_game = game
+
+        return closest_game
+
+    def check_selected(self, col, row, dt):
+        if not self.selected[0]:
+            diff = abs(self.curtain_alpha - 200)
+            if int(diff) >= 1:
+                self.curtain_alpha += diff * 0.15 * dt
+            else:
+                self.curtain_alpha = 200
+        else:
+            diff = abs(self.curtain_alpha - 0)
+            if int(diff) >= 1:
+                self.curtain_alpha -= diff * 0.15 * dt
+            else:
+                self.curtain_alpha = 0
+
+        self.selected[1] = False
+        if row == self.row and col == self.col:
+            self.selected[1] = True
+
     def update(self, dt, col, row):
         # check if selected
-        self.check_selected(col, row)
+        self.check_selected(col, row, dt)
+        self.curtain.set_alpha(self.curtain_alpha)
 
-        self.update_scroll(self.selected)
+        self.update_scroll(self.selected, dt)
 
         # adjust target values
         self.target_angle = self.angle_increment * self.target_index
@@ -573,11 +800,22 @@ class GameWheelUi(UiElement):
         # Keep master_angle normalized
         self.master_angle %= 360
 
+        # update games
         for game in self.games:
-            game.update(dt, self.master_index, self.master_angle, self.selected, self.scroll)
+            game.update(dt, self.master_index, self.master_angle, self.selected[1], self.scroll)
 
-    def update_scroll(self, selected):
-        if not selected:
+        # get closest game
+        self.lowest_game = self.get_lowest_game()
+
+    def update_scroll(self, selected, dt):
+        # x selection
+        if not selected[0]:
+            self.target_scroll[0] = -150
+        else:
+            self.target_scroll[0] = 0
+
+        # y selection
+        if not selected[1]:
             self.target_scroll[1] = 15
         else:
             self.target_scroll[1] = 0
@@ -586,7 +824,7 @@ class GameWheelUi(UiElement):
         if self.scroll[0] != self.target_scroll[0]:
             diff = (self.target_scroll[0] - self.scroll[0])
             if abs(diff) > 1:
-                self.scroll[0] += diff * 0.15
+                self.scroll[0] += diff * 0.15 * dt
             else:
                 self.scroll[0] = self.target_scroll[0]
 
@@ -594,7 +832,7 @@ class GameWheelUi(UiElement):
         if self.scroll[1] != self.target_scroll[1]:
             diff = (self.target_scroll[1] - self.scroll[1])
             if abs(diff) > 1:
-                self.scroll[1] += diff * 0.15
+                self.scroll[1] += diff * 0.15 * dt
             else:
                 self.scroll[1] = self.target_scroll[1]
 
@@ -620,7 +858,12 @@ class GameWheelUi(UiElement):
         for game in [s for s in sorted_games if s.z_depth >= 2.0]:
             game.draw(display)
 
-        if self.selected:
+        display.blit(self.curtain, self.curtain_rect)
+
+        for game in [s for s in sorted_games if s == self.lowest_game]:
+            game.draw(display)
+
+        if False not in self.selected:
             self.game_label.draw(display)
 
 
@@ -670,10 +913,8 @@ class ShugrPiOS:
         all_games_data = self.gm.load_games(self.master_games_path)
         self.game_wheel = GameWheelUi(half_display_x, half_display_y + 60, 180, 60, all_games_data)
 
-        """ UI setup """
-        UiElement("10:34", 50, 10, 0, 0, 10)
-        UiElement("85%", 600, 10, 0, 1, 10)
-        UiElement(".!|", 700, 10, 0, 2, 10)
+        """ UI manager setup """
+        dummy_ui = UiElement("Nothing", -100, -100, 0, 0, 1)
 
         self.banner_top = pygame.Surface((DISPLAY_WIDTH, 60)).convert()
         self.banner_top.fill(GRAY)
@@ -686,6 +927,10 @@ class ShugrPiOS:
         self.banner_bottom_rect.midbottom = (half_display_x, DISPLAY_HEIGHT)
 
         self.um = UiManager(ui_group)
+        self.um.y_index = 1
+
+        """ other UI setup """
+        self.game_menu = GameMenu(self.am, self.fade_to_game)
 
         """ effects setup """
         self.curtain = Curtain()
@@ -732,11 +977,9 @@ class ShugrPiOS:
                     pygame.event.get()
 
                     if self.running_game.poll() is not None:
-                        stderr = self.running_game.stderr.read()
-                        self.running_game = False
-                        self.pause = False
-                        self.curtain.target_alpha = 0
-                        self.clock.tick(FPS)
+                        self.handle_game_output()
+
+                        self.resume_menu()
 
         except (Exception, KeyboardInterrupt) as e:
             if isinstance(e, Exception):
@@ -759,7 +1002,7 @@ class ShugrPiOS:
                     self.logo_alpha += 5 * dt
                 else:
                     self.logo_alpha = 255
-                    self.am.play_sound("logo")
+                    self.am.play_sound("logo", in_loop=True)
             else:
                 if not self.timers["logo"].update(dt):
                     if self.logo_alpha > 0:
@@ -779,10 +1022,11 @@ class ShugrPiOS:
 
             self.um.update(dt)
 
+            self.game_menu.update(dt)
+
             if self.start_game:
                 if self.curtain.flip:
                     self.execute_game()
-
 
     def events(self, phase):
         # handle events
@@ -801,20 +1045,47 @@ class ShugrPiOS:
                     self.timers["start"].finished = True
 
                 elif phase == 0:
-                    if event.key == pygame.K_UP:
-                        self.um.change_row(-1)
-                    if event.key == pygame.K_DOWN:
-                        self.um.change_row(1)
-                    if self.game_wheel.selected:
+                    # game wheel
+                    if self.game_wheel.selected[1] and not self.game_menu.toggled:
+                        # navigation
+                        if event.key == pygame.K_UP:
+                            self.um.change_row(-1)
+                        if event.key == pygame.K_DOWN:
+                            self.um.change_row(1)
                         if event.key == pygame.K_LEFT:
                             self.game_wheel.update_index(-1, self.am)
                         if event.key == pygame.K_RIGHT:
                             self.game_wheel.update_index(1, self.am)
+
+                        # functions
                         if event.key == pygame.K_RSHIFT:
-                            self.game_wheel.sort_games()
+                            self.game_wheel.sort_games(self.am)
                         if event.key == pygame.K_RETURN:
-                            self.fade_to_game()
+                            self.game_menu.game = self.game_wheel.games[self.game_wheel.master_index].name
+                            self.game_wheel.selected[0] = False
+                            self.game_menu.toggle()
+
+                    # game menu
+                    elif self.game_menu.toggled:
+                        # navigation
+                        if event.key == pygame.K_UP:
+                            self.game_menu.um.change_row(-1)
+                        if event.key == pygame.K_DOWN:
+                            self.game_menu.um.change_row(1)
+
+                        # functions
+                        if event.key == pygame.K_RETURN:
+                            self.game_wheel.selected[0] = self.game_menu.action()
+                        if event.key == pygame.K_BACKSPACE:
+                            self.game_wheel.selected[0] = True
+                            self.game_menu.toggle()
+
+                    # normal
                     else:
+                        if event.key == pygame.K_UP:
+                            self.um.change_row(-1)
+                        if event.key == pygame.K_DOWN:
+                            self.um.change_row(1)
                         if event.key == pygame.K_LEFT:
                             self.um.change_col(-1)
                         if event.key == pygame.K_RIGHT:
@@ -846,9 +1117,14 @@ class ShugrPiOS:
             for ui in ui_group:
                 ui.draw(self.display)
 
+            self.game_menu.draw(self.display)
+
             self.curtain.draw(self.display)
 
-        self.screen.blit(pygame.transform.scale(self.display, self.screen.get_size()), (0, 0))
+        if self.display.get_size() != self.screen.get_size():
+            self.screen.blit(pygame.transform.scale(self.display, self.screen.get_size()), (0, 0))
+        else:
+            self.screen.blit(self.display, (0, 0))
         pygame.display.flip()
 
     """ game utilities """
@@ -859,13 +1135,44 @@ class ShugrPiOS:
         self.curtain.set_color(DARK_GRAY)
         self.curtain.target_alpha = 255
         self.start_game = True
+        self.am.stop_music()
 
     def execute_game(self):
+        pygame.mixer.pause()
+
         proc, path, env = self.game_wheel.prepare_game()
 
-        self.running_game = subprocess.Popen(proc, cwd=path, env=env, stderr=subprocess.PIPE, text=True)
+        self.running_game = subprocess.Popen(proc, cwd=path, stderr=subprocess.PIPE, text=True)
         self.start_game = False
         self.pause = True
+
+    def handle_game_output(self):
+        ignored_errors = ["libpng"]
+
+        stderr = self.running_game.stderr.read()
+        is_error = False
+        for err in ignored_errors:
+            if err not in stderr and len(stderr.splitlines()) > 1:
+                is_error = True
+
+        if is_error:
+            logger.error(f"`{self.game_wheel.lowest_game.name}` has crashed due to the following error:\n" + stderr)
+
+        else:
+            logger.info(f"`{self.game_wheel.lowest_game.name}` has terminated successfully")
+
+    def resume_menu(self):
+        self.running_game = False
+        self.pause = False
+
+        self.curtain.target_alpha = 0
+        self.game_wheel.selected[0] = True
+
+        pygame.mixer.unpause()
+        self.am.play_music("shugrpi_bg")
+        self.game_menu.toggle()
+
+        self.clock.tick(FPS)
 
     """ various utilities """
     def get_image(self, img):
@@ -881,6 +1188,7 @@ class ShugrPiOS:
                 if self.curtain.flip:
                     self.master_phase = new_phase
                     self.am.reset_sounds()
+                    self.am.play_music("shugrpi_bg")
                     self.curtain.target_alpha = 0
         else:
             if self.master_phase != new_phase:
@@ -899,6 +1207,8 @@ class ShugrPiOS:
     """ main shutdown """
     def shutdown(self):
         logger.info("Shutting down...")
+        if self.running_game:
+            self.running_game.terminate()
         self.running = False
         pygame.quit()
         self.stop_event.set()
