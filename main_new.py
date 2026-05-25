@@ -12,6 +12,9 @@ from constants import *
 import os
 import sys
 
+# startup meesage
+logger.info(f"SHUGRPi Operating System v{VERSION}")
+
 # initialize Compatibilty Manager
 c = CompatibilityManager(logger)
 is_shugrpi, base_path, os.environ = c.init()
@@ -42,28 +45,38 @@ from shutil import rmtree
 # initialize pygame with necessary setups
 def init_pygame():
     os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
+    os.environ.setdefault("AUDIODEV", "0")
     pygame.init()
     logger.info("Initialized pygame-ce")
+    active_driver = None
 
     # setup audio
     try:
         pygame.mixer.init()
-        logger.info(f"Using audio driver: {pygame.mixer.get_driver()}")
-    except pygame.error as e:
+        active_driver = pygame.mixer.get_driver()
+        logger.info(f"Using audio driver: {active_driver}")
+        return active_driver
+
+    except Exception as e:
         drivers = ["wasapi", "alsa", "dummy"]
-        active_driver = None
         for driver in drivers:
             try:
                 os.environ["SDL_AUDIODRIVER"] = driver
                 pygame.mixer.quit()
                 pygame.mixer.init()
                 active_driver = driver
-                logger.info(f"Using audio driver: {driver}")
+                logger.info(f"Trying audio driver: {active_driver}")
                 break
-            except pygame.error as e:
-                logger.error("No audio drivers available")
+            except Exception as e:
+                active_driver = None
+                logger.error(f"Driver not available: {driver}")
 
-    return pygame.mixer.get_driver()
+    if active_driver:
+        logger.info(f"Using audio driver: {active_driver}")
+    else:
+        logger.error("No audio drivers available")
+
+    return active_driver
 
 
 # initialize pygame
@@ -83,6 +96,9 @@ pygame.display.set_icon(master_images["icon"])
 
 # groups
 ui_group = pygame.sprite.Group()
+
+# current time
+current_time = time.strftime("%H:%M")
 
 
 # screen-size curtain for transitions
@@ -201,24 +217,61 @@ class UiElement(pygame.sprite.Sprite):
             pygame.sprite.Sprite.__init__(self, ui_group)
         else:
             pygame.sprite.Sprite.__init__(self, group)
+
+        self.x = x
+        self.y = y
         self.row = row
         self.col = col
+        self.size = size
 
-        pre_rect = pygame.Rect((x, y, 10, 10))
+        self.label = label
+        self.label_type = self._get_label_type(self.label)
 
-        self.text = Text(label, pre_rect.centerx, pre_rect.centery, WHITE, size, centered=True)
-        r = self.text.rect
-        self.rect = pygame.Rect((r.x - size//2, r.y - size//2, r.width + size, r.height + size))
+        if self.label_type == 0:
+            self.pre_rect = pygame.Rect((self.x, self.y, 10, 10))
+            self.text = Text(label, self.pre_rect.centerx, self.pre_rect.centery, WHITE, size, font=retro_font, centered=True)
+            r = self.text.rect
+            self.rect = pygame.Rect((r.x - size//2, r.y - size//2, r.width + size, r.height + size))
+            self.original_pos = self.rect.topleft
 
-        self.original_pos = self.rect.topleft
+        elif self.label_type == 1:
+            self.image = label
+            self.rect = self.image.get_rect()
+            self.rect.topleft = (x, y)
+            self.original_pos = self.rect.center
 
         self.selected = False
 
         self.func = func
 
+    def _get_label_type(self, label):
+        if type(label) == str:
+            return 0
+
+        elif type(label) == pygame.surface.Surface:
+            return 1
+
+        elif label is None:
+            return None
+
+    def change_label(self, new_label):
+        if new_label != self.label:
+            self.label_type = self._get_label_type(new_label)
+            if self.label_type == 0:
+                self.pre_rect = pygame.Rect((self.x, self.y, 10, 10))
+                self.text = Text(new_label, self.pre_rect.centerx, self.pre_rect.centery, WHITE, self.size, font=retro_font, centered=True)
+                r = self.text.rect
+                self.rect = pygame.Rect((r.x - self.size//2, r.y - self.size//2, r.width + self.size, r.height + self.size))
+
+            elif self.label_type == 1:
+                self.image = new_label
+                self.rect = self.image.get_rect()
+                self.rect.center = self.original_pos
+
     def update(self, dt, col, row):
         self.check_selected(col, row)
-        self.text.rect.center = self.rect.center
+        if self.label_type == 0:
+            self.text.rect.center = self.rect.center
 
     def check_selected(self, col, row):
         self.selected = False
@@ -232,7 +285,11 @@ class UiElement(pygame.sprite.Sprite):
     def draw(self, display):
         if self.selected:
             pygame.draw.rect(display, WHITE, self.rect, 3)
-        self.text.draw(display)
+
+        if self.label_type == 0:
+            self.text.draw(display)
+        elif self.label_type == 1:
+            display.blit(self.image, self.rect)
 
 
 # UI Manager
@@ -615,14 +672,14 @@ class GameManager:
             step_1 = step_0.replace("^", " " * (26 - self.paddings[i]))
             self.log_data[i] = step_1.replace("+", " " * 8)
 
-        header = "----Folder" + "-" * (self.padding - 2) + "Game" + "-" * 8 + "Config----"
+        header = "*---Folder" + "-" * (self.padding - 2) + "Game" + "-" * 8 + "Config---*"
         logger.info("Detected the folders listed below:".center(len(header)))
         logger.info(header)
 
         for log in self.log_data:
             logger.info(log)
 
-        logger.info("-" * len(header))
+        logger.info("*" + "-" * (len(header) - 2) + "*")
 
 
 # game wheel object
@@ -867,6 +924,40 @@ class GameWheelUi(UiElement):
             self.game_label.draw(display)
 
 
+# notification object
+class Notification:
+    def __init__(self, msg):
+        self.reset(msg)
+
+    def update(self, dt):
+        self.surf.set_alpha(self.alpha)
+        if self.display_timer.update(dt):
+            self.alpha = max(0, self.alpha - 5 * dt)
+        self.text.update()
+
+    def reset(self, msg=None):
+        self.msg = str(msg)
+        self.size = 9
+        self.x = DISPLAY_WIDTH - 20
+        self.y = 40
+
+        self.text = Text(self.msg, 0, 0, WHITE, self.size, font=retro_font)
+
+        self.surf = pygame.Surface(self.text.rect.size).convert()
+        self.rect = self.surf.get_rect()
+        self.rect.topright = (self.x, self.y)
+
+        self.alpha = 255 if msg is not None else 0
+        self.display_timer = Timer(240)
+
+        self.surf.set_alpha(self.alpha)
+
+    def draw(self, display):
+        if self.alpha:
+            self.text.draw(self.surf)
+            display.blit(self.surf, self.rect)
+
+
 # main SHUGRPi OS app
 class ShugrPiOS:
     def __init__(self, is_shugrpi, master_images):
@@ -884,6 +975,7 @@ class ShugrPiOS:
         self.clock = pygame.time.Clock()
         self.timers = {}
         self.pause = False
+        self.current_time = current_time
 
         """ manager setup """
         self.am = AudioManager(logger, self.is_shugrpi)
@@ -913,8 +1005,11 @@ class ShugrPiOS:
         all_games_data = self.gm.load_games(self.master_games_path)
         self.game_wheel = GameWheelUi(half_display_x, half_display_y + 60, 180, 60, all_games_data)
 
+        """ images setup """
+        self.battery_image = pygame.transform.scale(self.get_image("battery", True), (30, 30))
+
         """ UI manager setup """
-        dummy_ui = UiElement("Nothing", -100, -100, 0, 0, 1)
+        self.clock_ui = UiElement(self.current_time, 30, 10, 0, 0, size=10)
 
         self.banner_top = pygame.Surface((DISPLAY_WIDTH, 60)).convert()
         self.banner_top.fill(GRAY)
@@ -932,6 +1027,8 @@ class ShugrPiOS:
         """ other UI setup """
         self.game_menu = GameMenu(self.am, self.fade_to_game)
 
+        self.notification = Notification(None)
+
         """ effects setup """
         self.curtain = Curtain()
         self.curtain.set_color(DARKER_GRAY)
@@ -943,8 +1040,10 @@ class ShugrPiOS:
 
         """ master running variable """
         self.running = True
-        self.running_game = None
+        self.running_game = [None, None]
         self.start_game = False
+
+        logger.info("Finished initializing SHUGRPi")
 
     """ main runner """
     def run(self):
@@ -954,6 +1053,8 @@ class ShugrPiOS:
         step = 0
         try:
             while self.running:
+                self.current_time = time.strftime("%H:%M")
+
                 if not self.pause:
                     # tick clock
                     dt = self.clock.tick(FPS) / 1000.0 * 60
@@ -972,11 +1073,11 @@ class ShugrPiOS:
                     self.draw()
 
                 # while game is running
-                if self.running_game:
+                if self.running_game[1] is not None:
                     # keep app minimally responsive to avoid breakage
                     pygame.event.get()
 
-                    if self.running_game.poll() is not None:
+                    if self.running_game[1].poll() is not None:
                         self.handle_game_output()
 
                         self.resume_menu()
@@ -986,7 +1087,8 @@ class ShugrPiOS:
                 error_msg = f"SHUGRPi has crashed due to the following error: {e}"
                 logger.error(error_msg)
                 pygame.display.message_box(window_title, error_msg, "error")
-            self.shutdown()
+                self.shutdown(1)
+            self.shutdown(-1)
 
     """ main loop """
     def update(self, dt):
@@ -1013,7 +1115,6 @@ class ShugrPiOS:
                     if self.logo_alpha == 0:
                         self.switch_phase(0, dt, True)
                         self.logo_alpha = 0
-                        logger.info("Finished initializing ShugrPi OS")
                         logger.info("Running main loop")
 
         # main menu
@@ -1023,6 +1124,10 @@ class ShugrPiOS:
             self.um.update(dt)
 
             self.game_menu.update(dt)
+
+            self.notification.update(dt)
+
+            self.clock_ui.change_label(self.current_time)
 
             if self.start_game:
                 if self.curtain.flip:
@@ -1090,6 +1195,8 @@ class ShugrPiOS:
                             self.um.change_col(-1)
                         if event.key == pygame.K_RIGHT:
                             self.um.change_col(1)
+                        if event.key == pygame.K_RETURN:
+                            self.um.action()
 
     def draw(self):
         self.screen.fill(DARKER_GRAY)
@@ -1119,6 +1226,8 @@ class ShugrPiOS:
 
             self.game_menu.draw(self.display)
 
+            self.notification.draw(self.display)
+
             self.curtain.draw(self.display)
 
         if self.display.get_size() != self.screen.get_size():
@@ -1138,22 +1247,36 @@ class ShugrPiOS:
         self.am.stop_music()
 
     def execute_game(self):
-        pygame.mixer.pause()
+        if audio_driver:
+            pygame.mixer.pause()
 
         proc, path, env = self.game_wheel.prepare_game()
+        self.running_game[0] = self.game_wheel.lowest_game.name
 
-        self.running_game = subprocess.Popen(proc, cwd=path, stderr=subprocess.PIPE, text=True)
-        self.start_game = False
-        self.pause = True
+        try:
+            self.running_game[1] = subprocess.Popen(proc, cwd=path, env=env, stderr=subprocess.PIPE, text=True)
+            self.start_game = False
+            self.pause = True
+        except Exception as e:
+            logger.error(f"Failed to launch {self.running_game[0]}")
+            self.resume_menu()
 
     def handle_game_output(self):
         ignored_errors = ["libpng"]
 
-        stderr = self.running_game.stderr.read()
+        stderr = self.running_game[1].stderr.read()
         is_error = False
+        simple_error = None
         for err in ignored_errors:
             if err not in stderr and len(stderr.splitlines()) > 1:
                 is_error = True
+                simple_error = stderr.splitlines()[-1]
+
+        if simple_error is not None:
+            title = self.running_game[0]
+            if len(title) > 13:
+                title = title[:13] + "..."
+            self.notification.reset(f"`{title}` crashed due to: `{simple_error}`")
 
         if is_error:
             logger.error(f"`{self.game_wheel.lowest_game.name}` has crashed due to the following error:\n" + stderr)
@@ -1162,20 +1285,21 @@ class ShugrPiOS:
             logger.info(f"`{self.game_wheel.lowest_game.name}` has terminated successfully")
 
     def resume_menu(self):
-        self.running_game = False
+        self.running_game = [None, None]
         self.pause = False
 
         self.curtain.target_alpha = 0
         self.game_wheel.selected[0] = True
 
-        pygame.mixer.unpause()
+        if audio_driver:
+            pygame.mixer.unpause()
         self.am.play_music("shugrpi_bg")
         self.game_menu.toggle()
 
         self.clock.tick(FPS)
 
     """ various utilities """
-    def get_image(self, img):
+    def get_image(self, img, alpha=False, colorkey=None):
         try:
             return master_images[img]
         except:
@@ -1205,16 +1329,16 @@ class ShugrPiOS:
             logger.error(f"Failed to update internet status: {e}")
 
     """ main shutdown """
-    def shutdown(self):
+    def shutdown(self, code=0):
         logger.info("Shutting down...")
-        if self.running_game:
+        if self.running_game[1] is not None:
             self.running_game.terminate()
         self.running = False
         pygame.quit()
         self.stop_event.set()
         self.wifi_thread.join()
         logger.info("Shutdown complete!")
-        sys.exit()
+        sys.exit(code)
 
 
 # start up SHUGRPi OS

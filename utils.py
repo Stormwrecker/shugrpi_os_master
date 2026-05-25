@@ -11,8 +11,8 @@ from socket import gethostbyname, gethostname
 
 # misc values
 base_path = os.path.dirname(os.path.abspath(__file__))
-is_shugrpi = False
 default_font = os.path.join(base_path, "fonts", "Kenney_Bold.ttf")
+retro_font = os.path.join(base_path, "fonts", "PressStart2P.ttf")
 font_cache = {}
 
 # set up logger
@@ -28,17 +28,15 @@ logger = logging.getLogger("SHUGRPi")
 # compatibility management
 class CompatibilityManager:
     def __init__(self, logger):
+        """Manage system and environment variables"""
         self.system = {"machine":platform.machine().lower(), "platform":platform.system().lower()}
 
         self.is_shugrpi = False
         if self.system["machine"] == "aarch64" and self.system["platform"] == "linux":
             self.is_shugrpi = True
-        logger.info(f"Running on SHUGRPi: {'yes' if is_shugrpi else 'no'}")
+        logger.info(f"Running on SHUGRPi device: {'yes' if self.is_shugrpi else 'no'}")
 
         self.base_path = self._update_paths(self.system["platform"])
-        self.audio_driver = None
-
-        self._update_env()
 
     def _update_paths(self, platform):
         base_path = None
@@ -48,36 +46,6 @@ class CompatibilityManager:
             base_path = os.path.dirname(os.path.abspath(__file__))
         return base_path
 
-    def init_audio_and_driver(self, pg, env, logger, is_shugrpi):
-        drivers = ["wasapi", "alsa", "dummy"]
-
-        for driver in drivers:
-            # try:
-            env["SDL_AUDIODRIVER"] = driver
-            pg.mixer.quit()
-
-
-            if is_shugrpi:
-                pg.mixer.init(48000)
-            else:
-                pg.mixer.init()
-
-            logger.info(f"Using audio driver: {pygame.mixer.get_driver()}")
-            break
-
-            # except pg.error as e:
-            #     logger.error(f"Failed audio driver: {driver} ({e})")
-
-        if self.audio_driver is None:
-            env["SDL_AUDIODRIVER"] = "dummy"
-            pg.mixer.quit()
-            pg.mixer.init()
-            self.audio_driver = "dummy"
-            logger.error(f"No audio drivers available; Revert to dummy")
-
-        return pg, env.copy()
-
-
     def _update_env(self):
         if self.is_shugrpi:
             os.environ["DISPLAY"] = ":0"
@@ -86,6 +54,7 @@ class CompatibilityManager:
         os.environ["PYGAME_HIDE_SUPPORT_PROMPT"] = "0"
 
     def init(self):
+        self._update_env()
         return self.is_shugrpi, self.base_path, os.environ.copy()
 
 
@@ -95,9 +64,13 @@ class AudioManager:
         # master library for sounds and music tracks
         self.master_sounds = {}
         self.master_music_tracks = {}
+        self.working = True
 
-        self._load_sounds()
-        self._load_musics()
+        try:
+            self._load_sounds()
+            self._load_musics()
+        except:
+            self.working = False
 
     def _get_sound_path(self, path):
         return os.path.join(base_path, "audio", path + ".wav")
@@ -115,31 +88,36 @@ class AudioManager:
         self.master_music_tracks["shugrpi_bg"] = [self._get_music_path("shugrpi_bg"), .2]
 
     def play_music(self, music):
-        pygame.mixer.music.fadeout(1000)
+        if self.working:
+            pygame.mixer.music.fadeout(1000)
 
-        pygame.mixer.music.load(self.master_music_tracks[music][0])
-        pygame.mixer.music.set_volume(self.master_music_tracks[music][1])
-        pygame.mixer.music.play(-1, fade_ms=500)
+            pygame.mixer.music.load(self.master_music_tracks[music][0])
+            pygame.mixer.music.set_volume(self.master_music_tracks[music][1])
+            pygame.mixer.music.play(-1, fade_ms=500)
 
     def stop_music(self):
-        pygame.mixer.music.fadeout(500)
+        if self.working:
+            pygame.mixer.music.fadeout(500)
 
     def play_sound(self, sound, in_loop=False):
-        if not self.master_sounds[sound][2]:
-            self.master_sounds[sound][0].set_volume(self.master_sounds[sound][1])
-            self.master_sounds[sound][0].play(0)
-            self.master_sounds[sound][2] = in_loop
+        if self.working:
+            if not self.master_sounds[sound][2]:
+                self.master_sounds[sound][0].set_volume(self.master_sounds[sound][1])
+                self.master_sounds[sound][0].play(0)
+                self.master_sounds[sound][2] = in_loop
 
     def stop_sound(self, sound):
-        self.master_sounds[sound][0].stop()
-        self.master_sounds[sound][2] = False
+        if self.working:
+            self.master_sounds[sound][0].stop()
+            self.master_sounds[sound][2] = False
 
     def reset_sounds(self):
         for sound in self.master_sounds:
             self.master_sounds[sound][2] = False
 
     def stop_all(self):
-        pygame.mixer.stop()
+        if self.working:
+            pygame.mixer.stop()
 
 
 """ Image Utilities """
@@ -158,7 +136,7 @@ def load_image(path, alpha=False):
 def preload_images():
     master_images = {}
     image_path = os.path.join(base_path, "images")
-    alpha_images = ["icon"]
+    alpha_images = ["icon", "battery"]
     for temp_file in os.listdir(image_path):
         temp_path = os.path.join(image_path, temp_file)
         if os.path.isfile(temp_path):
@@ -316,4 +294,6 @@ __all__ = ["CompatibilityManager",
            "logger",
            "load_thumbnail",
            "preload_images",
-           "Timer"]
+           "Timer",
+           "default_font",
+           "retro_font"]

@@ -50,6 +50,6 @@ Game configurations (DEFAULT_GAME_CONFIG)
 
 """
 
-DEFAULT_GAME_CONFIG = {"name": "Name Not Available",
+DEFAULT_GAME_CONFIG = {"name": "Unknown Game",
                        "thumbnail": None,
                        "executable": None}
