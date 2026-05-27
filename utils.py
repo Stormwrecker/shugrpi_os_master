@@ -8,6 +8,7 @@ import logging
 import time
 import subprocess
 from socket import gethostbyname, gethostname
+from constants import *
 
 # misc values
 base_path = os.path.dirname(os.path.abspath(__file__))
@@ -24,6 +25,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("SHUGRPi")
 
+""" Device Managers """
 
 # compatibility management
 class CompatibilityManager:
@@ -283,6 +285,263 @@ class Timer:
         self.finished = False
 
 
+""" UI utilities """
+
+# groups
+ui_group = pygame.sprite.Group()
+
+
+# generic UI element
+class UiElement(pygame.sprite.Sprite):
+    def __init__(self, label, x, y, row, col, size=8, font=default_font, group=None, func=None):
+        """
+        UI element that can be selected and activated via keyboard/controller navigation.
+        ``row`` and ``col`` can technically be used interchangeably depending on UI layout,
+        but for clarity, prefer ``row`` for vertical navigation and ``col`` for horizontal
+        navigation.
+
+        :param label: object used as the UI element's label (can be a string or a pygame.Surface)
+        :param x: x coordinate
+        :param y: y coordinate
+        :param row: the row from which the UI can be accessed via up/down navigation.
+        :param col: the column from which the UI can be accessed via left/right navigation
+        :param font: the font used for ``label`` (if string)
+        :param group: the group to contain the UI element
+        :param func: the function that this UI element can call on activation
+        """
+
+        if group is None:
+            pygame.sprite.Sprite.__init__(self, ui_group)
+        else:
+            pygame.sprite.Sprite.__init__(self, group)
+
+        self.x = x
+        self.y = y
+        self.row = row
+        self.col = col
+        self.size = size
+
+        self.label = label
+        self.label_type = self._get_label_type(self.label)
+
+        if self.label_type == 0:
+            self.pre_rect = pygame.Rect((self.x, self.y, 10, 10))
+            self.text = Text(label, self.pre_rect.centerx, self.pre_rect.centery, WHITE, size, font=font, centered=True)
+            r = self.text.rect
+            self.rect = pygame.Rect((r.x - size//2, r.y - size//2, r.width + size, r.height + size))
+            self.original_pos = self.rect.topleft
+
+        elif self.label_type == 1:
+            self.image = label
+            self.rect = self.image.get_rect()
+            self.rect.topleft = (x, y)
+            self.original_pos = self.rect.center
+
+        self.selected = False
+
+        self.func = func
+
+    def _get_label_type(self, label):
+        if type(label) == str:
+            return 0
+
+        elif type(label) == pygame.surface.Surface:
+            return 1
+
+        elif label is None:
+            return None
+
+    def change_label(self, new_label):
+        if new_label != self.label:
+            self.label_type = self._get_label_type(new_label)
+            if self.label_type == 0:
+                self.pre_rect = pygame.Rect((self.x, self.y, 10, 10))
+                self.text = Text(new_label, self.pre_rect.centerx, self.pre_rect.centery, WHITE, self.size, font=retro_font, centered=True)
+                r = self.text.rect
+                self.rect = pygame.Rect((r.x - self.size//2, r.y - self.size//2, r.width + self.size, r.height + self.size))
+
+            elif self.label_type == 1:
+                self.image = new_label
+                self.rect = self.image.get_rect()
+                self.rect.center = self.original_pos
+
+    def update(self, dt, col, row):
+        self.check_selected(col, row)
+        if self.label_type == 0:
+            self.text.rect.center = self.rect.center
+
+    def check_selected(self, col, row):
+        self.selected = False
+        if row == self.row and col == self.col:
+            self.selected = True
+
+    def action(self):
+        if self.func is not None:
+            self.func()
+
+    def draw(self, display):
+        if self.selected:
+            pygame.draw.rect(display, WHITE, self.rect, 3)
+
+        if self.label_type == 0:
+            self.text.draw(display)
+        elif self.label_type == 1:
+            display.blit(self.image, self.rect)
+
+
+# UI Manager
+class UiManager:
+    def __init__(self, ui_group):
+        """
+        Manager for navigating in-game UI with keyboard input
+
+        UI elements are organized first by row (y dimension) then column (x dimension)
+        """
+
+        self.ui_group = sorted(ui_group, key=lambda ui: [ui.row, ui.col])
+
+        self.master_ui_dict = {}
+        for ui in self.ui_group:
+            if ui.row not in self.master_ui_dict:
+                self.master_ui_dict[ui.row] = []
+            self.master_ui_dict[ui.row].append(ui)
+
+        self.master_ui_list = []
+        for val in self.master_ui_dict.values():
+            self.master_ui_list.extend(val)
+
+        self.x_index = 0
+        self.y_index = 0
+
+    def update(self, dt):
+        for ui in self.master_ui_list:
+            ui.update(dt, self.x_index, self.y_index)
+
+    def change_col(self, val):
+        self.x_index += val
+        self.x_index %= len(self.master_ui_dict[self.y_index])
+
+    def change_row(self, val):
+        self.y_index += val
+        self.y_index %= len(self.master_ui_dict)
+        self.x_index = 0
+
+    def action(self):
+        self.master_ui_dict[self.y_index][self.x_index].action()
+        return self.master_ui_dict[self.y_index][self.x_index]
+
+    def draw(self, display):
+        for ui in self.master_ui_list:
+            ui.draw(display)
+
+
+# notification object
+class Notification:
+    def __init__(self, msg):
+        self.reset(msg)
+
+    def update(self, dt):
+        self.surf.set_alpha(self.alpha)
+        if self.display_timer.update(dt):
+            self.alpha = max(0, self.alpha - 5 * dt)
+        self.text.update()
+
+    def reset(self, msg=None):
+        self.msg = str(msg)
+        self.size = 9
+        self.x = DISPLAY_WIDTH - 20
+        self.y = 40
+
+        self.text = Text(self.msg, 0, 0, WHITE, self.size, font=retro_font)
+
+        self.surf = pygame.Surface(self.text.rect.size).convert_alpha()
+        self.surf.set_colorkey(BLACK)
+        self.rect = self.surf.get_rect()
+        self.rect.topright = (self.x, self.y)
+
+        self.alpha = 255 if msg is not None else 0
+        self.display_timer = Timer(240)
+
+        self.surf.set_alpha(self.alpha)
+
+    def draw(self, display):
+        if self.alpha:
+            self.text.draw(self.surf)
+            display.blit(self.surf, self.rect)
+
+
+# dialog menu
+class DialogMenu:
+    def __init__(self, msg, instant=False, has_ui=False, options=["OK"]):
+        self.reset(msg, instant, has_ui, options)
+
+    def reset(self, msg, instant=False, has_ui=False, options=["OK"]):
+        self.msg = msg
+
+        if instant:
+            self.alpha = 200
+            self.y = half_display_y
+        else:
+            self.alpha = 0
+            self.y = half_display_y + 100
+
+        self.showing = False
+        self.text = None
+
+        self.show_timer = Timer(180)
+
+        self.has_ui = has_ui
+
+        self.um = False
+        if self.has_ui:
+            self.ui_group = pygame.sprite.Group()
+            if "OK" in options:
+                ok_btn = UiElement(option, self.rect.centerx, self.rect.centery, 0, 0, group=self.ui_group,
+                                   func=self.fade_out)
+                ok_btn.rect.center = (self.rect.centerx, self.rect.bottom - 40)
+            self.um = UiManager(self.ui_group)
+
+        self.width = 500
+        self.height = 250
+
+        self.surf = pygame.Surface((self.width, self.height)).convert_alpha()
+        self.surf.fill(GRAY)
+        self.rect = self.surf.get_rect()
+        self.rect.center = (half_display_x, self.y)
+
+        if self.msg is not None:
+            self.showing = True
+            self.text = Text(self.msg, self.rect.width // 2, self.rect.height // 2 - 10, WHITE, 23, centered=True)
+            self.text.draw(self.surf)
+
+        self.surf.set_alpha(self.alpha)
+
+    def update(self, dt):
+        self.surf.set_alpha(self.alpha)
+
+        if self.has_ui:
+            self.um.update(dt)
+        else:
+            if self.show_timer.update(dt):
+                self.fade_out()
+
+        if self.showing:
+            self.alpha = min(self.alpha + 10 * dt, 255)
+            self.y += (half_display_y - self.y) * .15 * dt
+        else:
+            self.alpha = max(0, self.alpha - 10 * dt)
+            self.y += (half_display_y + 50 - self.y) * .15 * dt
+
+        self.rect.center = (half_display_x, self.y)
+
+    def fade_out(self):
+        self.showing = False
+
+    def draw(self, display):
+        if self.alpha:
+            display.blit(self.surf, self.rect)
+
+
 __all__ = ["CompatibilityManager",
            "AudioManager",
            "load_image",
@@ -296,4 +555,9 @@ __all__ = ["CompatibilityManager",
            "preload_images",
            "Timer",
            "default_font",
-           "retro_font"]
+           "retro_font",
+           "ui_group",
+           "UiElement",
+           "UiManager",
+           "Notification",
+           "DialogMenu"]

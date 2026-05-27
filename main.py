@@ -94,9 +94,6 @@ pygame.display.set_allow_screensaver(False)
 master_images = preload_images()
 pygame.display.set_icon(master_images["icon"])
 
-# groups
-ui_group = pygame.sprite.Group()
-
 # current time
 current_time = time.strftime("%H:%M")
 
@@ -208,134 +205,6 @@ class FloatingLogo(pygame.sprite.Sprite):
         self.image.set_alpha(self.alpha)
         if self.alpha:
             display.blit(self.image, self.rect)
-
-
-# generic UI element
-class UiElement(pygame.sprite.Sprite):
-    def __init__(self, label, x, y, row, col, size=8, group=None, func=None):
-        if group is None:
-            pygame.sprite.Sprite.__init__(self, ui_group)
-        else:
-            pygame.sprite.Sprite.__init__(self, group)
-
-        self.x = x
-        self.y = y
-        self.row = row
-        self.col = col
-        self.size = size
-
-        self.label = label
-        self.label_type = self._get_label_type(self.label)
-
-        if self.label_type == 0:
-            self.pre_rect = pygame.Rect((self.x, self.y, 10, 10))
-            self.text = Text(label, self.pre_rect.centerx, self.pre_rect.centery, WHITE, size, font=retro_font, centered=True)
-            r = self.text.rect
-            self.rect = pygame.Rect((r.x - size//2, r.y - size//2, r.width + size, r.height + size))
-            self.original_pos = self.rect.topleft
-
-        elif self.label_type == 1:
-            self.image = label
-            self.rect = self.image.get_rect()
-            self.rect.topleft = (x, y)
-            self.original_pos = self.rect.center
-
-        self.selected = False
-
-        self.func = func
-
-    def _get_label_type(self, label):
-        if type(label) == str:
-            return 0
-
-        elif type(label) == pygame.surface.Surface:
-            return 1
-
-        elif label is None:
-            return None
-
-    def change_label(self, new_label):
-        if new_label != self.label:
-            self.label_type = self._get_label_type(new_label)
-            if self.label_type == 0:
-                self.pre_rect = pygame.Rect((self.x, self.y, 10, 10))
-                self.text = Text(new_label, self.pre_rect.centerx, self.pre_rect.centery, WHITE, self.size, font=retro_font, centered=True)
-                r = self.text.rect
-                self.rect = pygame.Rect((r.x - self.size//2, r.y - self.size//2, r.width + self.size, r.height + self.size))
-
-            elif self.label_type == 1:
-                self.image = new_label
-                self.rect = self.image.get_rect()
-                self.rect.center = self.original_pos
-
-    def update(self, dt, col, row):
-        self.check_selected(col, row)
-        if self.label_type == 0:
-            self.text.rect.center = self.rect.center
-
-    def check_selected(self, col, row):
-        self.selected = False
-        if row == self.row and col == self.col:
-            self.selected = True
-
-    def action(self):
-        if self.func is not None:
-            self.func()
-
-    def draw(self, display):
-        if self.selected:
-            pygame.draw.rect(display, WHITE, self.rect, 3)
-
-        if self.label_type == 0:
-            self.text.draw(display)
-        elif self.label_type == 1:
-            display.blit(self.image, self.rect)
-
-
-# UI Manager
-class UiManager:
-    def __init__(self, ui_group):
-        """
-        Manager for navigating in-game UI with keyboard input
-
-        UI elements are organized first by row (y dimension) then column (x dimension)
-        """
-
-        self.ui_group = sorted(ui_group, key=lambda ui: [ui.row, ui.col])
-
-        self.master_ui_dict = {}
-        for ui in self.ui_group:
-            if ui.row not in self.master_ui_dict:
-                self.master_ui_dict[ui.row] = []
-            self.master_ui_dict[ui.row].append(ui)
-
-        self.master_ui_list = []
-        for val in self.master_ui_dict.values():
-            self.master_ui_list.extend(val)
-
-        self.x_index = 0
-        self.y_index = 0
-
-    def update(self, dt):
-        for ui in self.master_ui_list:
-            ui.update(dt, self.x_index, self.y_index)
-
-    def change_col(self, val):
-        self.x_index += val
-        self.x_index %= len(self.master_ui_dict[self.y_index])
-
-    def change_row(self, val):
-        self.y_index += val
-        self.y_index %= len(self.master_ui_dict)
-        self.x_index = 0
-
-    def action(self):
-        self.master_ui_dict[self.y_index][self.x_index].action()
-        return self.master_ui_dict[self.y_index][self.x_index]
-
-    def draw(self, display):
-        for ui in self.master_ui_list:
-            ui.draw(display)
 
 
 # game menu
@@ -924,40 +793,6 @@ class GameWheelUi(UiElement):
             self.game_label.draw(display)
 
 
-# notification object
-class Notification:
-    def __init__(self, msg):
-        self.reset(msg)
-
-    def update(self, dt):
-        self.surf.set_alpha(self.alpha)
-        if self.display_timer.update(dt):
-            self.alpha = max(0, self.alpha - 5 * dt)
-        self.text.update()
-
-    def reset(self, msg=None):
-        self.msg = str(msg)
-        self.size = 9
-        self.x = DISPLAY_WIDTH - 20
-        self.y = 40
-
-        self.text = Text(self.msg, 0, 0, WHITE, self.size, font=retro_font)
-
-        self.surf = pygame.Surface(self.text.rect.size).convert()
-        self.rect = self.surf.get_rect()
-        self.rect.topright = (self.x, self.y)
-
-        self.alpha = 255 if msg is not None else 0
-        self.display_timer = Timer(240)
-
-        self.surf.set_alpha(self.alpha)
-
-    def draw(self, display):
-        if self.alpha:
-            self.text.draw(self.surf)
-            display.blit(self.surf, self.rect)
-
-
 # main SHUGRPi OS app
 class ShugrPiOS:
     def __init__(self, is_shugrpi, master_images):
@@ -1009,7 +844,7 @@ class ShugrPiOS:
         self.battery_image = pygame.transform.scale(self.get_image("battery", True), (30, 30))
 
         """ UI manager setup """
-        self.clock_ui = UiElement(self.current_time, 30, 10, 0, 0, size=10)
+        self.clock_ui = UiElement(self.current_time, 30, 10, 0, 0, size=10, font=retro_font)
 
         self.banner_top = pygame.Surface((DISPLAY_WIDTH, 60)).convert()
         self.banner_top.fill(GRAY)
@@ -1027,6 +862,7 @@ class ShugrPiOS:
         """ other UI setup """
         self.game_menu = GameMenu(self.am, self.fade_to_game)
 
+        self.dialog_menu = DialogMenu(None)
         self.notification = Notification(None)
 
         """ effects setup """
@@ -1127,6 +963,8 @@ class ShugrPiOS:
 
             self.notification.update(dt)
 
+            self.dialog_menu.update(dt)
+
             self.clock_ui.change_label(self.current_time)
 
             if self.start_game:
@@ -1150,6 +988,10 @@ class ShugrPiOS:
                     self.timers["start"].finished = True
 
                 elif phase == 0:
+                    # dialog menu cancel
+                    if not self.dialog_menu.has_ui:
+                        self.dialog_menu.fade_out()
+
                     # game wheel
                     if self.game_wheel.selected[1] and not self.game_menu.toggled:
                         # navigation
@@ -1165,6 +1007,7 @@ class ShugrPiOS:
                         # functions
                         if event.key == pygame.K_RSHIFT:
                             self.game_wheel.sort_games(self.am)
+                            self.dialog_menu.reset("Sorted games", True)
                         if event.key == pygame.K_RETURN:
                             self.game_menu.game = self.game_wheel.games[self.game_wheel.master_index].name
                             self.game_wheel.selected[0] = False
@@ -1228,6 +1071,8 @@ class ShugrPiOS:
 
             self.notification.draw(self.display)
 
+            self.dialog_menu.draw(self.display)
+
             self.curtain.draw(self.display)
 
         if self.display.get_size() != self.screen.get_size():
@@ -1237,9 +1082,6 @@ class ShugrPiOS:
         pygame.display.flip()
 
     """ game utilities """
-    def sort_games(self, sort_type, reversed=False):
-        self.games = self.gm.sort_games(sort_type, reversed)
-
     def fade_to_game(self):
         self.curtain.set_color(DARK_GRAY)
         self.curtain.target_alpha = 255
