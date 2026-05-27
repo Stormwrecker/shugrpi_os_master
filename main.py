@@ -576,6 +576,7 @@ class GameWheelUi(UiElement):
         # all games
         self.games = []
         self.sort_types = ["name", "size", "last_played_raw"]
+        self.sort_names = {"name":"Name", "size":"Size", "last_played_raw":"Last Played"}
         self.sort_index = 0
         self.reverse_sort = False
 
@@ -862,7 +863,7 @@ class ShugrPiOS:
         """ other UI setup """
         self.game_menu = GameMenu(self.am, self.fade_to_game)
 
-        self.dialog_menu = DialogMenu(None)
+        self.dialog_menu = DialogMenu("Welcome to the SHUGRPi!", has_ui=True)
         self.notification = Notification(None)
 
         """ effects setup """
@@ -957,13 +958,18 @@ class ShugrPiOS:
         elif self.master_phase == 0:
             self.floating_logo.update(dt)
 
+            self.dialog_menu.update(dt)
+
+            if self.dialog_menu.showing and self.dialog_menu.has_ui:
+                self.um.active = False
+            else:
+                self.um.active = True
+
             self.um.update(dt)
 
             self.game_menu.update(dt)
 
             self.notification.update(dt)
-
-            self.dialog_menu.update(dt)
 
             self.clock_ui.change_label(self.current_time)
 
@@ -1006,8 +1012,10 @@ class ShugrPiOS:
 
                         # functions
                         if event.key == pygame.K_RSHIFT:
-                            self.game_wheel.sort_games(self.am)
-                            self.dialog_menu.reset("Sorted games", True)
+                            gw = self.game_wheel
+                            gw.sort_games(self.am)
+                            title = f"Sort By: {gw.sort_names[gw.sort_types[int(gw.sort_index)]]}\nAscending: {not gw.reverse_sort}"
+                            self.dialog_menu.reset(title, True)
                         if event.key == pygame.K_RETURN:
                             self.game_menu.game = self.game_wheel.games[self.game_wheel.master_index].name
                             self.game_wheel.selected[0] = False
@@ -1027,6 +1035,15 @@ class ShugrPiOS:
                         if event.key == pygame.K_BACKSPACE:
                             self.game_wheel.selected[0] = True
                             self.game_menu.toggle()
+
+                    # dialog menu
+                    elif self.dialog_menu.showing and self.dialog_menu.has_ui:
+                        if event.key in [pygame.K_UP, pygame.K_LEFT]:
+                            self.dialog_menu.um.change_col(-1)
+                        if event.key in [pygame.K_DOWN, pygame.K_RIGHT]:
+                            self.dialog_menu.um.change_col(1)
+                        if event.key == pygame.K_RETURN:
+                            self.dialog_menu.um.action()
 
                     # normal
                     else:

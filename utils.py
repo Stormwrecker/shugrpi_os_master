@@ -413,9 +413,18 @@ class UiManager:
         self.x_index = 0
         self.y_index = 0
 
+        self.active = True
+
     def update(self, dt):
+        if self.active:
+            x_index = self.x_index
+            y_index = self.y_index
+        else:
+            x_index = None
+            y_index = None
+
         for ui in self.master_ui_list:
-            ui.update(dt, self.x_index, self.y_index)
+            ui.update(dt, x_index, y_index)
 
     def change_col(self, val):
         self.x_index += val
@@ -473,6 +482,20 @@ class Notification:
 # dialog menu
 class DialogMenu:
     def __init__(self, msg, instant=False, has_ui=False, options=["OK"]):
+        self.width = 500
+        self.height = 250
+
+        self.surf = pygame.Surface((self.width, self.height)).convert_alpha()
+        self.surf.fill(GRAY)
+        self.surf.set_colorkey(BLACK)
+        self.rect = self.surf.get_rect()
+
+        self.shadow_surf = pygame.Surface((self.width, self.height)).convert_alpha()
+        self.shadow_surf.set_colorkey(BLACK)
+        self.shadow_surf.fill(BLACK)
+        for i in range(125):
+            pygame.draw.line(self.shadow_surf, ([max(90 - i//2, 40) for _ in range(3)]), (0, i*2), (self.width, i*2), 2)
+
         self.reset(msg, instant, has_ui, options)
 
     def reset(self, msg, instant=False, has_ui=False, options=["OK"]):
@@ -488,7 +511,11 @@ class DialogMenu:
         self.showing = False
         self.text = None
 
-        self.show_timer = Timer(180)
+        self.show_timer = Timer(120)
+
+        self.surf.fill(GRAY)
+        self.surf.blit(self.shadow_surf, (0, 0))
+        self.rect.center = (half_display_x, self.y)
 
         self.has_ui = has_ui
 
@@ -496,23 +523,15 @@ class DialogMenu:
         if self.has_ui:
             self.ui_group = pygame.sprite.Group()
             if "OK" in options:
-                ok_btn = UiElement(option, self.rect.centerx, self.rect.centery, 0, 0, group=self.ui_group,
+                ok_btn = UiElement("OK", self.rect.width // 2, self.rect.height - 50, 0, 0, 20, font=retro_font, group=self.ui_group,
                                    func=self.fade_out)
-                ok_btn.rect.center = (self.rect.centerx, self.rect.bottom - 40)
             self.um = UiManager(self.ui_group)
-
-        self.width = 500
-        self.height = 250
-
-        self.surf = pygame.Surface((self.width, self.height)).convert_alpha()
-        self.surf.fill(GRAY)
-        self.rect = self.surf.get_rect()
-        self.rect.center = (half_display_x, self.y)
 
         if self.msg is not None:
             self.showing = True
-            self.text = Text(self.msg, self.rect.width // 2, self.rect.height // 2 - 10, WHITE, 23, centered=True)
-            self.text.draw(self.surf)
+            for i, msg in enumerate(self.msg.splitlines()):
+                text = Text(msg, self.rect.width // 2, self.rect.height // 2 - 30 + (30 * i), WHITE, 15, font=retro_font, centered=True)
+                text.draw(self.surf)
 
         self.surf.set_alpha(self.alpha)
 
@@ -539,6 +558,8 @@ class DialogMenu:
 
     def draw(self, display):
         if self.alpha:
+            if self.has_ui:
+                self.um.draw(self.surf)
             display.blit(self.surf, self.rect)
 
 
