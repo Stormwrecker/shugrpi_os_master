@@ -1,4 +1,5 @@
 **Developer's Note: This is the active repository for the SHUGRPi project. Still in alpha phase...**
+The README will get brought up-to-speed when first release is finished.
 
 # What is a SHUGRPi?
 The **S**tormwrecker **H**andheld **U**nleashed **G**aming **R**aspberry **Pi** (or SHUGRPi for short) is a handheld gaming console that runs off of Pygame and runs Pygame games. It uses a Raspberry Pi 5 for computing.
