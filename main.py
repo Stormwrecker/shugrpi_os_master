@@ -9,6 +9,7 @@ All Rights Reserved
 # get necessary utilities
 from utils import *
 from constants import *
+from linux_api import *
 import os
 import sys
 
@@ -18,6 +19,9 @@ logger.info(f"SHUGRPi Operating System v{VERSION}")
 # initialize Compatibilty Manager
 c = CompatibilityManager(logger)
 is_shugrpi, base_path, os.environ = c.init()
+
+# initialize Linux API
+linux = Linux(is_shugrpi)
 
 # import pygame
 import pygame
@@ -796,9 +800,10 @@ class GameWheelUi(UiElement):
 
 # main SHUGRPi OS app
 class ShugrPiOS:
-    def __init__(self, is_shugrpi, master_images):
+    def __init__(self, is_shugrpi, linux, master_images):
         """ Master class for the SHUGRPi Operating System """
         self.is_shugrpi = is_shugrpi
+        self.linux = linux
 
         """ window/display setup """
         self.screen = screen
@@ -1201,5 +1206,5 @@ class ShugrPiOS:
 
 
 # start up SHUGRPi OS
-shugrpi_os = ShugrPiOS(is_shugrpi, master_images)
+shugrpi_os = ShugrPiOS(is_shugrpi, linux, master_images)
 shugrpi_os.run()
