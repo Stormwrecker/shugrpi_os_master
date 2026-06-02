@@ -4,12 +4,18 @@ import subprocess
 
 # Linux API
 class Linux:
-    def __init__(self, is_shugrpi):
+    def __init__(self, is_shugrpi, logger):
         self.is_shugrpi = is_shugrpi
+        self.logger = logger
 
     """set time"""
     def set_time(self, time):
-        return self._call(["sudo", "timedatactl", "set-time", time])
+        code = self._call(["sudo", "timedatectl", "set-time", time])
+        if code != 0:
+            self.logger.error("Failed to set the time")
+        else:
+            self.logger.info(f"Set time to `{time}`")
+        return code
 
     """git commands"""
     def git_clone(self, repo="https://github.com/Stormwrecker/shugrpi_os_master.git"):

@@ -21,7 +21,7 @@ c = CompatibilityManager(logger)
 is_shugrpi, base_path, os.environ = c.init()
 
 # initialize Linux API
-linux = Linux(is_shugrpi)
+linux = Linux(is_shugrpi, logger)
 
 # import pygame
 import pygame
@@ -912,7 +912,7 @@ class ShugrPiOS:
 
     def setup_clock_room(self):
         ui_group = pygame.sprite.Group()
-        self.set_time_ui = UiElement("Set Time", half_display_x, half_display_y - 50, 0, 0, size=10, font=retro_font, group=ui_group, func= lambda: self.sys_clock.set_time(self.current_time))
+        self.set_time_ui = UiElement("Set Time", half_display_x, half_display_y - 50, 0, 0, size=10, font=retro_font, group=ui_group, func= lambda: self.set_time())
         self.hour_ui = UiElement(self.sys_clock.hour, half_display_x - 120, half_display_y - 50, 0, 1, size=10, font=retro_font, group=ui_group, func= lambda: self.rooms["clock"][2].change_col(1))
         self.minute_ui = UiElement(self.sys_clock.minute, half_display_x - 80, half_display_y - 50, 0, 2, size=10, font=retro_font, group=ui_group, func= lambda: self.rooms["clock"][2].change_col(1))
         self.round_clock_ui = UiElement(self.sys_clock.round_clock_labels[int(self.sys_clock.round_clock)], half_display_x, half_display_y + 50, 1, 0, size=10, font=retro_font, group=ui_group, func=self.switch_time_format)
@@ -1294,14 +1294,18 @@ class ShugrPiOS:
         if event.key == pygame.K_BACKSPACE:
             self.current_room = self.rm.switch_to("games")
 
+    def set_time(self):
+        self.sys_clock.set_time(self.hour_ui.label + ":" + self.minute_ui.label)
+
     def switch_time_format(self):
         self.sys_clock.switch_format()
         if not self.sys_clock.round_clock:
             if int(self.hour_ui.label) > 12:
                 label = str(int(self.hour_ui.label) % 12)
+                self.hour_ui.change_label(("0" if int(label) < 10 else "") + label)
             elif int(self.hour_ui.label) < 1:
                 label = "12"
-            self.hour_ui.change_label(("0" if int(label) < 10 else "") + label)
+                self.hour_ui.change_label(("0" if int(label) < 10 else "") + label)
 
         self.round_clock_ui.change_label(self.sys_clock.round_clock_labels[self.sys_clock.round_clock])
 

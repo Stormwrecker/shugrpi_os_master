@@ -684,7 +684,7 @@ class SystemClock:
         self.round_clock_labels = ["12-hour format", "24-hour format"]
 
     def set_time(self, t):
-        self.linux.set_time(time.strptime(t, "%H:%M"))
+        self.linux.set_time(time.strftime("%Y-%m-%d") + " " + str(t) + ":00")
 
     def switch_format(self):
         self.round_clock = not self.round_clock
