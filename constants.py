@@ -1,10 +1,11 @@
 """Constants for the SHUGRPi OS"""
 
 # version (major.minor)
-VERSION = 0.9
+VERSION = "0.9"
 
 # frame rate
 FPS = 60
+SPEED = 1
 
 # colors
 WHITE = (255, 255, 255)

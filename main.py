@@ -49,7 +49,6 @@ from shutil import rmtree
 # initialize pygame with necessary setups
 def init_pygame():
     os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
-    os.environ.setdefault("AUDIODEV", "0")
     pygame.init()
     logger.info("Initialized pygame-ce")
     active_driver = None
@@ -109,7 +108,7 @@ class Curtain(pygame.sprite.Sprite):
         self.color = BLACK
 
         self.image = pygame.Surface((1, 1), pygame.SRCALPHA)
-        self.image = pygame.transform.scale(self.image, screen.get_size()).convert()
+        self.image = pygame.transform.scale(self.image, (DISPLAY_WIDTH, DISPLAY_HEIGHT)).convert()
         self.rect = self.image.get_rect()
         self.rect.topleft = (0, 0)
 
@@ -557,8 +556,8 @@ class GameManager:
 
 # game wheel object
 class GameWheelUi(UiElement):
-    def __init__(self, x, y, w, h, g):
-        UiElement.__init__(self, None, x, y, 1, 0)
+    def __init__(self, x, y, w, h, games, group):
+        UiElement.__init__(self, None, x, y, 1, 0, group=group)
 
         self.rect = pygame.Rect((x, y, w, h))
         self.rect.center = (x, y)
@@ -575,7 +574,7 @@ class GameWheelUi(UiElement):
         self.lowest_game = None
 
         # get games' data
-        self.all_games_data = g
+        self.all_games_data = games
 
         # all games
         self.games = []
@@ -603,7 +602,7 @@ class GameWheelUi(UiElement):
         self.selected = [True, True]
 
         self.curtain = pygame.Surface((1, 1), pygame.SRCALPHA)
-        self.curtain = pygame.transform.scale(self.curtain, (screen.get_width(), screen.get_height() - 60)).convert()
+        self.curtain = pygame.transform.scale(self.curtain, (DISPLAY_WIDTH, DISPLAY_HEIGHT - 60)).convert()
         self.curtain_rect = self.curtain.get_rect()
         self.curtain_rect.topleft = (0, 30)
 
@@ -817,22 +816,28 @@ class ShugrPiOS:
         self.timers = {}
         self.pause = False
         self.current_time = current_time
+        self.sys_clock = SystemClock(self.linux, self.current_time)
+
+        """ timers setup """
+        self.timers["pre_init"] = Timer(60)
+        self.timers["logo"] = Timer(120)
+        self.timers["start"] = Timer(180)
 
         """ manager setup """
         self.am = AudioManager(logger, self.is_shugrpi)
         self.gm = GameManager()
 
-        """ asset setup """
-        self.fail_image = master_images["fail_load"]
+        """ games setup """
+        self.master_games_path = os.path.join(base_path, GAME_PATH)
 
+        """ images setup """
+        self.battery_image = pygame.transform.scale(self.get_image("battery", True), (30, 30))
+        self.fail_image = master_images["fail_load"]
         self.original_logo_img = self.get_image("logo")
         self.logo_img = pygame.transform.scale(self.original_logo_img, (int(165 * 3), int(165 * 3)))
         self.big_logo_img = pygame.transform.scale(self.original_logo_img, (int(165 * 4), int(165 * 4)))
         self.logo_alpha = 0
         self.logo_img.set_alpha(self.logo_alpha)
-
-        self.timers["logo"] = Timer(120)
-        self.timers["start"] = Timer(180)
 
         """ utility setup """
         self.internet_connection = check_internet_status()
@@ -841,17 +846,17 @@ class ShugrPiOS:
         self.wifi_thread = threading.Thread(name="SHUGRPi Internet Updater", target=self.update_internet_connection, daemon=True)
         self.wifi_thread.start()
 
-        """ games setup """
-        self.master_games_path = os.path.join(base_path, GAME_PATH)
-        all_games_data = self.gm.load_games(self.master_games_path)
-        self.game_wheel = GameWheelUi(half_display_x, half_display_y + 60, 180, 60, all_games_data)
+        """ room setup """
+        self.rooms = {}
+        self.ui_managers = {}
 
-        """ images setup """
-        self.battery_image = pygame.transform.scale(self.get_image("battery", True), (30, 30))
+        """ setup UI for rooms """
+        self.setup_game_room()
+        self.setup_clock_room()
+        self.setup_network_room()
+        self.setup_power_room()
 
-        """ UI manager setup """
-        self.clock_ui = UiElement(self.current_time, 30, 10, 0, 0, size=10, font=retro_font)
-
+        """ universal UI setup """
         self.banner_top = pygame.Surface((DISPLAY_WIDTH, 60)).convert()
         self.banner_top.fill(GRAY)
         self.banner_top_rect = self.banner_top.get_rect()
@@ -862,13 +867,7 @@ class ShugrPiOS:
         self.banner_bottom_rect = self.banner_bottom.get_rect()
         self.banner_bottom_rect.midbottom = (half_display_x, DISPLAY_HEIGHT)
 
-        self.um = UiManager(ui_group)
-        self.um.y_index = 1
-
-        """ other UI setup """
-        self.game_menu = GameMenu(self.am, self.fade_to_game)
-
-        self.dialog_menu = DialogMenu("Welcome to the SHUGRPi!", has_ui=True)
+        self.dialog_menu = DialogMenu(self.screen, "Welcome to the SHUGRPi!", has_ui=True)
         self.notification = Notification(None)
 
         """ effects setup """
@@ -876,16 +875,58 @@ class ShugrPiOS:
         self.curtain.set_color(DARKER_GRAY)
         self.floating_logo = FloatingLogo()
 
+        """ create rooms """
+        self.create_room("games", 0, 0, self.ui_managers["games"])
+        self.create_room("clock", 0, -1, self.ui_managers["clock"])
+        self.create_room("network", 0, -1)
+        self.create_room("power", 0, -1)
+
+        self.rm = RoomManager(self.rooms)
+        self.current_room = self.rm.current_room
+
         """ master phase variable """
         self.master_phase = -2
-        self.timers["pre_init"] = Timer(60)
 
         """ master running variable """
         self.running = True
         self.running_game = [None, None]
         self.start_game = False
 
-        logger.info("Finished initializing SHUGRPi")
+        logger.info("Initialized SHUGRPi Operating System")
+
+    """ room ui setup """
+    def setup_game_room(self):
+        ui_group = pygame.sprite.Group()
+
+        all_games_data = self.gm.load_games(self.master_games_path)
+        self.game_wheel = GameWheelUi(half_display_x, half_display_y + 60, 180, 60, all_games_data, ui_group)
+
+        self.clock_ui = UiElement(self.current_time, 30, 10, 0, 0, size=10, font=retro_font, group=ui_group, func= lambda: self.switch_room("clock"))
+        self.network_ui = UiElement("Wifi", DISPLAY_WIDTH - 100, 10, 0, 1, size=10, font=retro_font, group=ui_group, func= lambda: self.switch_room("network"))
+        self.power_ui = UiElement("Power", DISPLAY_WIDTH - 50, 10, 0, 2, size=10, font=retro_font, group=ui_group, func= lambda: self.switch_room("power"))
+
+        self.game_menu = GameMenu(self.am, self.fade_to_game)
+
+        self.create_ui_manager("games", ui_group)
+        self.ui_managers["games"].y_index = 1
+
+    def setup_clock_room(self):
+        ui_group = pygame.sprite.Group()
+        self.set_time_ui = UiElement("Set Time", half_display_x, half_display_y - 50, 0, 0, size=10, font=retro_font, group=ui_group, func= lambda: self.sys_clock.set_time(self.current_time))
+        self.hour_ui = UiElement(self.sys_clock.hour, half_display_x - 120, half_display_y - 50, 0, 1, size=10, font=retro_font, group=ui_group, func= lambda: self.rooms["clock"][2].change_col(1))
+        self.minute_ui = UiElement(self.sys_clock.minute, half_display_x - 80, half_display_y - 50, 0, 2, size=10, font=retro_font, group=ui_group, func= lambda: self.rooms["clock"][2].change_col(1))
+        self.round_clock_ui = UiElement(self.sys_clock.round_clock_labels[int(self.sys_clock.round_clock)], half_display_x, half_display_y + 50, 1, 0, size=10, font=retro_font, group=ui_group, func=self.switch_time_format)
+        self.back_button = UiElement("Back", DISPLAY_WIDTH - 50, DISPLAY_HEIGHT - 50, 2, 0, group=ui_group, func=lambda: self.switch_room("games"))
+
+        self.colon = Text(":", half_display_x - 100, half_display_y - 50, WHITE, 10, retro_font)
+
+        self.create_ui_manager("clock", ui_group)
+
+    def setup_network_room(self):
+        ui_group = pygame.sprite.Group()
+
+    def setup_power_room(self):
+        ui_group = pygame.sprite.Group()
 
     """ main runner """
     def run(self):
@@ -895,7 +936,7 @@ class ShugrPiOS:
         step = 0
         try:
             while self.running:
-                self.current_time = time.strftime("%H:%M")
+                self.current_time = time.strftime("%H:%M") if self.sys_clock.round_clock else time.strftime("%I:%M")
 
                 if not self.pause:
                     # tick clock
@@ -907,7 +948,7 @@ class ShugrPiOS:
                     self.curtain.update(dt)
 
                     while time_accum >= 1 and step <= 50:
-                        self.update(1)
+                        self.update(SPEED)
                         time_accum -= 1
                         step += 1
 
@@ -929,6 +970,7 @@ class ShugrPiOS:
                 error_msg = f"SHUGRPi has crashed due to the following error: {e}"
                 logger.error(error_msg)
                 pygame.display.message_box(window_title, error_msg, "error")
+                raise
                 self.shutdown(1)
             self.shutdown(-1)
 
@@ -965,18 +1007,26 @@ class ShugrPiOS:
 
             self.dialog_menu.update(dt)
 
-            if self.dialog_menu.showing and self.dialog_menu.has_ui:
-                self.um.active = False
-            else:
-                self.um.active = True
+            self.rm.update(dt)
 
-            self.um.update(dt)
+            if self.dialog_menu.showing and self.dialog_menu.has_ui:
+                self.rm.current_room[2].active = False
+                self.game_wheel.selected[1] = False
+            else:
+                self.rm.current_room[2].active = True
+
+            for _, room in self.rooms.items():
+                room[2].update(dt)
 
             self.game_menu.update(dt)
 
             self.notification.update(dt)
 
             self.clock_ui.change_label(self.current_time)
+
+            if self.current_room[3] != "clock":
+                self.hour_ui.change_label(self.current_time.split(":")[0])
+                self.minute_ui.change_label(self.current_time.split(":")[1])
 
             if self.start_game:
                 if self.curtain.flip:
@@ -999,50 +1049,8 @@ class ShugrPiOS:
                     self.timers["start"].finished = True
 
                 elif phase == 0:
-                    # dialog menu cancel
-                    if not self.dialog_menu.has_ui:
-                        self.dialog_menu.fade_out()
-
-                    # game wheel
-                    if self.game_wheel.selected[1] and not self.game_menu.toggled:
-                        # navigation
-                        if event.key == pygame.K_UP:
-                            self.um.change_row(-1)
-                        if event.key == pygame.K_DOWN:
-                            self.um.change_row(1)
-                        if event.key == pygame.K_LEFT:
-                            self.game_wheel.update_index(-1, self.am)
-                        if event.key == pygame.K_RIGHT:
-                            self.game_wheel.update_index(1, self.am)
-
-                        # functions
-                        if event.key == pygame.K_RSHIFT:
-                            gw = self.game_wheel
-                            gw.sort_games(self.am)
-                            title = f"Sort By: {gw.sort_names[gw.sort_types[int(gw.sort_index)]]}\nAscending: {not gw.reverse_sort}"
-                            self.dialog_menu.reset(title, True)
-                        if event.key == pygame.K_RETURN:
-                            self.game_menu.game = self.game_wheel.games[self.game_wheel.master_index].name
-                            self.game_wheel.selected[0] = False
-                            self.game_menu.toggle()
-
-                    # game menu
-                    elif self.game_menu.toggled:
-                        # navigation
-                        if event.key == pygame.K_UP:
-                            self.game_menu.um.change_row(-1)
-                        if event.key == pygame.K_DOWN:
-                            self.game_menu.um.change_row(1)
-
-                        # functions
-                        if event.key == pygame.K_RETURN:
-                            self.game_wheel.selected[0] = self.game_menu.action()
-                        if event.key == pygame.K_BACKSPACE:
-                            self.game_wheel.selected[0] = True
-                            self.game_menu.toggle()
-
                     # dialog menu
-                    elif self.dialog_menu.showing and self.dialog_menu.has_ui:
+                    if self.dialog_menu.showing and self.dialog_menu.has_ui:
                         if event.key in [pygame.K_UP, pygame.K_LEFT]:
                             self.dialog_menu.um.change_col(-1)
                         if event.key in [pygame.K_DOWN, pygame.K_RIGHT]:
@@ -1050,18 +1058,96 @@ class ShugrPiOS:
                         if event.key == pygame.K_RETURN:
                             self.dialog_menu.um.action()
 
-                    # normal
-                    else:
-                        if event.key == pygame.K_UP:
-                            self.um.change_row(-1)
-                        if event.key == pygame.K_DOWN:
-                            self.um.change_row(1)
+                    # dialog menu cancel
+                    if not self.dialog_menu.has_ui:
+                        self.dialog_menu.fade_out()
+
+                    if self.current_room[3] == "games":
+
+                        # game wheel
+                        if self.game_wheel.selected[1] and not self.game_menu.toggled:
+                            # navigation
+                            if event.key == pygame.K_UP:
+                                self.ui_managers["games"].change_row(-1)
+                            if event.key == pygame.K_DOWN:
+                                self.ui_managers["games"].change_row(1)
+                            if event.key == pygame.K_LEFT:
+                                self.game_wheel.update_index(-1, self.am)
+                            if event.key == pygame.K_RIGHT:
+                                self.game_wheel.update_index(1, self.am)
+
+                            # functions
+                            if event.key == pygame.K_RSHIFT:
+                                gw = self.game_wheel
+                                gw.sort_games(self.am)
+                                title = f"Sort By: {gw.sort_names[gw.sort_types[int(gw.sort_index)]]}\nAscending: {not gw.reverse_sort}"
+                                self.dialog_menu.reset(title, True)
+                            if event.key == pygame.K_RETURN:
+                                self.game_menu.game = self.game_wheel.games[self.game_wheel.master_index].name
+                                self.game_wheel.selected[0] = False
+                                self.game_menu.toggle()
+
+                        # game menu
+                        elif self.game_menu.toggled:
+                            # navigation
+                            if event.key == pygame.K_UP:
+                                self.game_menu.um.change_row(-1)
+                            if event.key == pygame.K_DOWN:
+                                self.game_menu.um.change_row(1)
+
+                            # functions
+                            if event.key == pygame.K_RETURN:
+                                self.game_wheel.selected[0] = self.game_menu.action()
+                            if event.key == pygame.K_BACKSPACE:
+                                self.game_wheel.selected[0] = True
+                                self.game_menu.toggle()
+
+                        # normal
+                        else:
+                            self.default_ui_nav(event)
+
+                    elif self.current_room[3] == "clock":
+                        if self.hour_ui.selected:
+                            if event.key == pygame.K_UP:
+                                if self.sys_clock.round_clock:
+                                    label = (int(self.hour_ui.label) + 1) % 24
+                                else:
+                                    label = int(self.hour_ui.label) + 1
+                                    if label > 12:
+                                        label = 1
+                                self.hour_ui.change_label(("0" if label < 10 else "") + str(label))
+                            if event.key == pygame.K_DOWN:
+                                if self.sys_clock.round_clock:
+                                    label = (int(self.hour_ui.label) - 1) % 24
+                                else:
+                                    label = int(self.hour_ui.label) - 1
+                                    if label < 1:
+                                        label = 12
+                                self.hour_ui.change_label(("0" if label < 10 else "") + str(label))
+                        elif self.minute_ui.selected:
+                            if event.key == pygame.K_UP:
+                                label = str((int(self.minute_ui.label) + 1) % 60)
+                                self.minute_ui.change_label(("0" if int(label) < 10 else "") + label)
+                            if event.key == pygame.K_DOWN:
+                                label = str((int(self.minute_ui.label) - 1) % 60)
+                                self.minute_ui.change_label(("0" if int(label) < 10 else "") + label)
+                        else:
+                            if event.key == pygame.K_UP:
+                                self.current_room[2].change_row(-1)
+                            if event.key == pygame.K_DOWN:
+                                self.current_room[2].change_row(1)
+
                         if event.key == pygame.K_LEFT:
-                            self.um.change_col(-1)
+                            self.current_room[2].change_col(-1)
                         if event.key == pygame.K_RIGHT:
-                            self.um.change_col(1)
+                            self.current_room[2].change_col(1)
                         if event.key == pygame.K_RETURN:
-                            self.um.action()
+                            self.current_room[2].action()
+                        if event.key == pygame.K_BACKSPACE:
+                            self.switch_room("games")
+
+                    else:
+                        self.default_ui_nav(event)
 
     def draw(self):
         self.screen.fill(DARKER_GRAY)
@@ -1081,26 +1167,37 @@ class ShugrPiOS:
         elif self.master_phase == 0:
             self.display.fill(DARK_GRAY)
 
+            self.rm.clear()
+
             self.floating_logo.draw(self.display)
 
-            self.display.blit(self.banner_top, (self.banner_top_rect.x, self.banner_top_rect.y))
-            self.display.blit(self.banner_bottom, (self.banner_bottom_rect.x, self.banner_bottom_rect.y))
+            for _, room in self.rooms.items():
+                room[1].blit(self.banner_top, (self.banner_top_rect.x, self.banner_top_rect.y))
+                room[1].blit(self.banner_bottom, (self.banner_bottom_rect.x, self.banner_bottom_rect.y))
 
-            for ui in ui_group:
-                ui.draw(self.display)
+            for _, room in self.rooms.items():
+                room[2].draw(room[1])
 
-            self.game_menu.draw(self.display)
+            self.game_menu.draw(self.rooms["games"][1])
+            self.colon.draw(self.rooms["clock"][1])
 
-            self.notification.draw(self.display)
+            self.rm.draw(self.display)
 
             self.dialog_menu.draw(self.display)
 
+            self.notification.draw(self.display)
+
+            draw_text(self.display, str(round(self.clock.get_fps())), 30, 50, WHITE, 10, retro_font)
+
             self.curtain.draw(self.display)
 
+        # stretch display to fit screen
         if self.display.get_size() != self.screen.get_size():
             self.screen.blit(pygame.transform.scale(self.display, self.screen.get_size()), (0, 0))
         else:
             self.screen.blit(self.display, (0, 0))
+
+        # flip screen
         pygame.display.flip()
 
     """ game utilities """
@@ -1182,6 +1279,44 @@ class ShugrPiOS:
             if self.master_phase != new_phase:
                 self.master_phase = new_phase
                 self.am.reset_sounds()
+
+    def default_ui_nav(self, event):
+        if event.key == pygame.K_UP:
+            self.current_room[2].change_row(-1)
+        if event.key == pygame.K_DOWN:
+            self.current_room[2].change_row(1)
+        if event.key == pygame.K_LEFT:
+            self.current_room[2].change_col(-1)
+        if event.key == pygame.K_RIGHT:
+            self.current_room[2].change_col(1)
+        if event.key == pygame.K_RETURN:
+            self.current_room[2].action()
+        if event.key == pygame.K_BACKSPACE:
+            self.current_room = self.rm.switch_to("games")
+
+    def switch_time_format(self):
+        self.sys_clock.switch_format()
+        if not self.sys_clock.round_clock:
+            if int(self.hour_ui.label) > 12:
+                label = str(int(self.hour_ui.label) % 12)
+            elif int(self.hour_ui.label) < 1:
+                label = "12"
+            self.hour_ui.change_label(("0" if int(label) < 10 else "") + label)
+
+        self.round_clock_ui.change_label(self.sys_clock.round_clock_labels[self.sys_clock.round_clock])
+
+    """ room utilities """
+    def create_ui_manager(self, name, ui_group):
+        self.ui_managers[name] = UiManager(ui_group)
+
+    def create_room(self, name, x, y, um=UiManager([UiElement("", 0, 0, 0, 0, group=[])])):
+        new_room = Room(x, y)
+        self.rooms[name] = [new_room, new_room.surf, um, name]
+
+    def switch_room(self, name):
+        self.current_room = self.rm.switch_to(name)
+        if name == "games":
+            self.current_room[2].y_index = 1
 
     """ threaded utilities """
     def update_internet_connection(self):

@@ -287,8 +287,7 @@ class Timer:
 
 """ UI utilities """
 
-# groups
-ui_group = pygame.sprite.Group()
+default_group = pygame.sprite.Group()
 
 
 # generic UI element
@@ -311,7 +310,7 @@ class UiElement(pygame.sprite.Sprite):
         """
 
         if group is None:
-            pygame.sprite.Sprite.__init__(self, ui_group)
+            pygame.sprite.Sprite.__init__(self, default_group)
         else:
             pygame.sprite.Sprite.__init__(self, group)
 
@@ -364,6 +363,8 @@ class UiElement(pygame.sprite.Sprite):
                 self.image = new_label
                 self.rect = self.image.get_rect()
                 self.rect.center = self.original_pos
+
+            self.label = new_label
 
     def update(self, dt, col, row):
         self.check_selected(col, row)
@@ -427,15 +428,18 @@ class UiManager:
             ui.update(dt, x_index, y_index)
 
     def change_col(self, val):
-        self.x_index += val
-        self.x_index %= len(self.master_ui_dict[self.y_index])
+        if self.active:
+            self.x_index += val
+            self.x_index %= len(self.master_ui_dict[self.y_index])
 
     def change_row(self, val):
-        self.y_index += val
-        self.y_index %= len(self.master_ui_dict)
-        self.x_index = 0
+        if self.active:
+            self.y_index += val
+            self.y_index %= len(self.master_ui_dict)
+            self.x_index = 0
 
     def action(self):
+        # if self.active:
         self.master_ui_dict[self.y_index][self.x_index].action()
         return self.master_ui_dict[self.y_index][self.x_index]
 
@@ -481,7 +485,7 @@ class Notification:
 
 # dialog menu
 class DialogMenu:
-    def __init__(self, msg, instant=False, has_ui=False, options=["OK"]):
+    def __init__(self, screen, msg, instant=False, has_ui=False, options=["OK"]):
         self.width = 500
         self.height = 250
 
@@ -496,16 +500,31 @@ class DialogMenu:
         for i in range(125):
             pygame.draw.line(self.shadow_surf, ([max(90 - i//2, 40) for _ in range(3)]), (0, i*2), (self.width, i*2), 2)
 
+        self.curtain = pygame.Surface((1, 1), pygame.SRCALPHA)
+        self.curtain = pygame.transform.scale(self.curtain, (screen.get_width(), screen.get_height() - 60)).convert()
+        self.curtain_rect = self.curtain.get_rect()
+        self.curtain_rect.topleft = (0, 30)
+
+        self.curtain.set_colorkey(WHITE)
+        self.curtain.fill(DARKER_GRAY)
+
+        self.curtain_alpha = 0
+        self.curtain.set_alpha(self.curtain_alpha)
+        self.curtain_fade_speed = 10
+
         self.reset(msg, instant, has_ui, options)
 
     def reset(self, msg, instant=False, has_ui=False, options=["OK"]):
         self.msg = msg
 
         if instant:
-            self.alpha = 200
+            self.alpha = max(200, self.alpha)
+            self.curtain_alpha = max(50, self.curtain_alpha)
+            self.curtain_fade_speed = 20
             self.y = half_display_y
         else:
             self.alpha = 0
+            self.curtain_fade_speed = 10
             self.y = half_display_y + 100
 
         self.showing = False
@@ -534,9 +553,11 @@ class DialogMenu:
                 text.draw(self.surf)
 
         self.surf.set_alpha(self.alpha)
+        self.curtain.set_alpha(self.curtain_alpha)
 
     def update(self, dt):
         self.surf.set_alpha(self.alpha)
+        self.curtain.set_alpha(self.curtain_alpha)
 
         if self.has_ui:
             self.um.update(dt)
@@ -547,9 +568,11 @@ class DialogMenu:
         if self.showing:
             self.alpha = min(self.alpha + 10 * dt, 255)
             self.y += (half_display_y - self.y) * .15 * dt
+            self.curtain_alpha = min(self.curtain_alpha + self.curtain_fade_speed * dt, 200)
         else:
             self.alpha = max(0, self.alpha - 10 * dt)
             self.y += (half_display_y + 50 - self.y) * .15 * dt
+            self.curtain_alpha = max(0, self.curtain_alpha - 10 * dt)
 
         self.rect.center = (half_display_x, self.y)
 
@@ -558,9 +581,113 @@ class DialogMenu:
 
     def draw(self, display):
         if self.alpha:
+            display.blit(self.curtain, self.curtain_rect)
             if self.has_ui:
                 self.um.draw(self.surf)
             display.blit(self.surf, self.rect)
+
+
+""" Room Utilities """
+
+# room object
+class Room:
+    def __init__(self, x, y):
+        self.orig_x = x
+        self.orig_y = y
+
+        self.x = self.orig_x
+        self.y = self.orig_y
+
+        self.surf = pygame.Surface((1, 1)).convert_alpha()
+        self.surf = pygame.transform.scale(self.surf, (DISPLAY_WIDTH, DISPLAY_HEIGHT)).convert_alpha()
+        self.rect = self.surf.get_rect()
+        self.rect.topleft = (self.x * DISPLAY_WIDTH, self.y * DISPLAY_HEIGHT)
+        self.rect = pygame.FRect(self.rect)
+
+        self.moving = False
+
+    def move(self, dx=0, dy=0):
+        self.x = dx
+        self.y = dy
+        self.moving = True
+
+    def clear(self):
+        self.surf.fill((0, 0, 0, 0))
+
+    def update_pos(self, dt):
+        if self.moving:
+            actual_target_x = self.x * DISPLAY_WIDTH
+            diff = abs(self.rect.x - actual_target_x)
+            if diff >= 1:
+                self.rect.x += (actual_target_x - self.rect.x) * .15 * dt
+            else:
+                self.rect.x = actual_target_x
+
+            actual_target_y = self.y * DISPLAY_HEIGHT
+            diff = abs(self.rect.y - actual_target_y)
+            if diff >= 1:
+                self.rect.y += (actual_target_y - self.rect.y) * .15 * dt
+            else:
+                self.rect.y = actual_target_y
+
+            if self.rect.x == actual_target_x and self.rect.y == actual_target_y:
+                self.moving = False
+
+    def draw(self, display):
+        display.blit(self.surf, self.rect)
+
+
+# room manager
+class RoomManager:
+    def __init__(self, rooms):
+        self.rooms = rooms
+        self.x = 0
+        self.y = 0
+        self.current_room = list(self.rooms.values())[0]
+
+    def switch_to(self, name):
+        target_room = self.rooms[name]
+        target_room[0].move(0, 0)
+        if target_room[2] is not None:
+            target_room[2].active = True
+
+        if self.current_room[2] is not None:
+            self.current_room[2].active = False
+        self.current_room[0].move(self.current_room[0].orig_x - target_room[0].orig_x, self.current_room[0].orig_y - target_room[0].orig_y)
+
+        self.current_room = target_room
+        return self.current_room
+
+    def update(self, dt):
+        for _, room in self.rooms.items():
+            room[0].update_pos(dt)
+
+    def clear(self):
+        for _, room in self.rooms.items():
+            room[0].clear()
+
+    def draw(self, display):
+        for _, room in self.rooms.items():
+            room[0].draw(display)
+
+
+""" Clock Utilities """
+
+class SystemClock:
+    def __init__(self, linux, current_time):
+        self.linux = linux
+        self.current_time = current_time
+        self.hour = self.current_time.split(":")[0]
+        self.minute = self.current_time.split(":")[1]
+
+        self.round_clock = False
+        self.round_clock_labels = ["12-hour format", "24-hour format"]
+
+    def set_time(self, t):
+        self.linux.set_time(time.strptime(t, "%H:%M"))
+
+    def switch_format(self):
+        self.round_clock = not self.round_clock
 
 
 __all__ = ["CompatibilityManager",
@@ -577,8 +704,10 @@ __all__ = ["CompatibilityManager",
            "Timer",
            "default_font",
            "retro_font",
-           "ui_group",
            "UiElement",
            "UiManager",
            "Notification",
-           "DialogMenu"]
+           "DialogMenu",
+           "Room",
+           "RoomManager",
+           "SystemClock"]
