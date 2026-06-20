@@ -10,6 +10,7 @@ All Rights Reserved
 from utils import *
 from constants import *
 from linux_api import *
+from virtual_keyboard import *
 import os
 import sys
 
@@ -807,7 +808,6 @@ class ShugrPiOS:
         """ window/display setup """
         self.screen = screen
         self.display = pygame.Surface((DISPLAY_WIDTH, DISPLAY_HEIGHT)).convert()
-        pygame.display.set_icon(master_images["icon"])
         self.display_info = pygame.display.Info()
         logger.info("Using video driver: " + pygame.display.get_driver())
 
@@ -878,11 +878,14 @@ class ShugrPiOS:
         """ create rooms """
         self.create_room("games", 0, 0, self.ui_managers["games"])
         self.create_room("clock", 0, -1, self.ui_managers["clock"])
-        self.create_room("network", 0, -1)
-        self.create_room("power", 0, -1)
+        self.create_room("network", 0, -1, self.ui_managers["network"])
+        self.create_room("power", 0, -1, self.ui_managers["power"])
 
         self.rm = RoomManager(self.rooms)
         self.current_room = self.rm.current_room
+
+        """virtual keyboard"""
+        self.virtual_keyboard = VirtualKeyboard()
 
         """ master phase variable """
         self.master_phase = -2
@@ -916,7 +919,7 @@ class ShugrPiOS:
         self.hour_ui = UiElement(self.sys_clock.hour, half_display_x - 120, half_display_y - 50, 0, 1, size=10, font=retro_font, group=ui_group, func= lambda: self.rooms["clock"][2].change_col(1))
         self.minute_ui = UiElement(self.sys_clock.minute, half_display_x - 80, half_display_y - 50, 0, 2, size=10, font=retro_font, group=ui_group, func= lambda: self.rooms["clock"][2].change_col(1))
         self.round_clock_ui = UiElement(self.sys_clock.round_clock_labels[int(self.sys_clock.round_clock)], half_display_x, half_display_y + 50, 1, 0, size=10, font=retro_font, group=ui_group, func=self.switch_time_format)
-        self.back_button = UiElement("Back", DISPLAY_WIDTH - 50, DISPLAY_HEIGHT - 50, 2, 0, group=ui_group, func=lambda: self.switch_room("games"))
+        self.back_button = UiElement("Back", DISPLAY_WIDTH - 50, DISPLAY_HEIGHT - 20, 2, 0, group=ui_group, func=lambda: self.switch_room("games"))
 
         self.colon = Text(":", half_display_x - 100, half_display_y - 50, WHITE, 10, retro_font)
 
@@ -924,9 +927,16 @@ class ShugrPiOS:
 
     def setup_network_room(self):
         ui_group = pygame.sprite.Group()
+        self.connect_ui = UiElement("Connect", half_display_x, 500, 0, 0, size=10, font=retro_font, group=ui_group, func=lambda: print("HI"))
+
+        self.create_ui_manager("network", ui_group)
 
     def setup_power_room(self):
         ui_group = pygame.sprite.Group()
+        self.power_ui = UiElement("Power Off", 100, 100, 0, 0, size=10, font=retro_font, group=ui_group, func=self.linux.power_off)
+        self.reboot_ui = UiElement("Reboot", 100, 200, 1, 0, size=10, font=retro_font, group=ui_group, func=lambda: self.shutdown(-1))
+
+        self.create_ui_manager("power", ui_group)
 
     """ main runner """
     def run(self):
@@ -1007,9 +1017,11 @@ class ShugrPiOS:
 
             self.dialog_menu.update(dt)
 
+            self.virtual_keyboard.update(dt)
+
             self.rm.update(dt)
 
-            if self.dialog_menu.showing and self.dialog_menu.has_ui:
+            if (self.dialog_menu.showing and self.dialog_menu.has_ui) or self.virtual_keyboard.toggled:
                 self.rm.current_room[2].active = False
                 self.game_wheel.selected[1] = False
             else:
@@ -1049,6 +1061,14 @@ class ShugrPiOS:
                     self.timers["start"].finished = True
 
                 elif phase == 0:
+                    # virtual keyboard
+                    if event.key == pygame.K_SPACE:
+                        self.virtual_keyboard.toggle()
+
+                    if self.virtual_keyboard.toggled:
+                        self.virtual_keyboard.handle_event(event)
+                        return
+
                     # dialog menu
                     if self.dialog_menu.showing and self.dialog_menu.has_ui:
                         if event.key in [pygame.K_UP, pygame.K_LEFT]:
@@ -1187,6 +1207,8 @@ class ShugrPiOS:
 
             self.notification.draw(self.display)
 
+            self.virtual_keyboard.draw(self.display)
+
             draw_text(self.display, str(round(self.clock.get_fps())), 30, 50, WHITE, 10, retro_font)
 
             self.curtain.draw(self.display)
@@ -1292,7 +1314,7 @@ class ShugrPiOS:
         if event.key == pygame.K_RETURN:
             self.current_room[2].action()
         if event.key == pygame.K_BACKSPACE:
-            self.current_room = self.rm.switch_to("games")
+            self.switch_room("games")
 
     def set_time(self):
         self.sys_clock.set_time(self.hour_ui.label + ":" + self.minute_ui.label)
@@ -1332,7 +1354,7 @@ class ShugrPiOS:
             logger.error(f"Failed to update internet status: {e}")
 
     """ main shutdown """
-    def shutdown(self, code=0):
+    def shutdown(self, code=0, system=False):
         logger.info("Shutting down...")
         if self.running_game[1] is not None:
             self.running_game.terminate()

@@ -244,6 +244,16 @@ def get_game_info(game_path, game_app):
             "last_played":last_played}
 
 
+# ease out to target number
+def ease_out_to(current_value, target_value, speed):
+    diff = (target_value - current_value)
+    if abs(int(diff)) > speed:
+        current_value += diff * speed
+    else:
+        current_value = target_value
+    return current_value
+
+
 # timer object
 class Timer:
     def __init__(self, duration, repeat=False, action=None):
@@ -292,7 +302,7 @@ default_group = pygame.sprite.Group()
 
 # generic UI element
 class UiElement(pygame.sprite.Sprite):
-    def __init__(self, label, x, y, row, col, size=8, font=default_font, group=None, func=None):
+    def __init__(self, label, x, y, row, col, size=8, font=default_font, centered=False, group=None, func=None):
         """
         UI element that can be selected and activated via keyboard/controller navigation.
         ``row`` and ``col`` can technically be used interchangeably depending on UI layout,
@@ -328,12 +338,15 @@ class UiElement(pygame.sprite.Sprite):
             self.text = Text(label, self.pre_rect.centerx, self.pre_rect.centery, WHITE, size, font=font, centered=True)
             r = self.text.rect
             self.rect = pygame.Rect((r.x - size//2, r.y - size//2, r.width + size, r.height + size))
-            self.original_pos = self.rect.topleft
+            self.original_pos = self.rect.topleft if not centered else self.rect.center
 
         elif self.label_type == 1:
             self.image = label
             self.rect = self.image.get_rect()
-            self.rect.topleft = (x, y)
+            if not centered:
+                self.rect.topleft = (x, y)
+            else:
+                self.rect.center = (x, y)
             self.original_pos = self.rect.center
 
         self.selected = False
@@ -382,7 +395,7 @@ class UiElement(pygame.sprite.Sprite):
 
     def draw(self, display):
         if self.selected:
-            pygame.draw.rect(display, WHITE, self.rect, 3)
+            pygame.draw.rect(display, WHITE, self.rect, 3, border_radius=3)
 
         if self.label_type == 0:
             self.text.draw(display)
@@ -392,7 +405,7 @@ class UiElement(pygame.sprite.Sprite):
 
 # UI Manager
 class UiManager:
-    def __init__(self, ui_group):
+    def __init__(self, ui_group, col_reset=True):
         """
         Manager for navigating in-game UI with keyboard input
 
@@ -413,6 +426,8 @@ class UiManager:
 
         self.x_index = 0
         self.y_index = 0
+
+        self.col_reset = col_reset
 
         self.active = True
 
@@ -436,7 +451,15 @@ class UiManager:
         if self.active:
             self.y_index += val
             self.y_index %= len(self.master_ui_dict)
-            self.x_index = 0
+            if self.col_reset:
+                self.x_index = 0
+            else:
+                if len(self.master_ui_dict[self.y_index]) <= self.x_index:
+                    self.x_index = len(self.master_ui_dict[self.y_index]) - 1
+
+    def reset(self):
+        self.x_index = 0
+        self.y_index = 0
 
     def action(self):
         # if self.active:
@@ -647,6 +670,7 @@ class RoomManager:
 
     def switch_to(self, name):
         target_room = self.rooms[name]
+        target_room[2].reset()
         target_room[0].move(0, 0)
         if target_room[2] is not None:
             target_room[2].active = True
@@ -698,6 +722,7 @@ __all__ = ["CompatibilityManager",
            "draw_text",
            "Text",
            "get_game_info",
+           "ease_out_to",
            "logger",
            "load_thumbnail",
            "preload_images",

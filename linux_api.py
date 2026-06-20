@@ -11,10 +11,12 @@ class Linux:
     """set time"""
     def set_time(self, time):
         code = self._call(["sudo", "timedatectl", "set-time", time])
-        if code != 0:
-            self.logger.error("Failed to set the time")
-        else:
+        if code == 0:
             self.logger.info(f"Set time to `{time}`")
+        elif code > 0:
+            self.logger.error("Failed to set the time")
+        elif code == -1:
+            self.logger.warning("Cannot set time on non-SHUGRPi device")
         return code
 
     """git commands"""
@@ -52,6 +54,11 @@ class Linux:
     def git_pull(self):
         return self._call(["git", "pull"])
 
+    """power commands"""
+    def power_off(self):
+        self.logger.info("Powering off device...")
+        self._run(["sudo", "poweroff"])
+
     """runners"""
     def _call(self, proc):
         if self.is_shugrpi:
@@ -72,6 +79,5 @@ def git(*args):
 def update_catalog():
     git("fetch", "origin")
     git("reset", "--hard", "origin/main")
-
 
 __all__ = ["Linux"]
