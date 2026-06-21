@@ -846,6 +846,12 @@ class ShugrPiOS:
         self.wifi_thread = threading.Thread(name="SHUGRPi Internet Updater", target=self.update_internet_connection, daemon=True)
         self.wifi_thread.start()
 
+        """virtual keyboard"""
+        self.virtual_keyboard = VirtualKeyboard()
+
+        """text field UI setup"""
+        self.text_fields = {}
+
         """ room setup """
         self.rooms = {}
         self.ui_managers = {}
@@ -883,9 +889,6 @@ class ShugrPiOS:
 
         self.rm = RoomManager(self.rooms)
         self.current_room = self.rm.current_room
-
-        """virtual keyboard"""
-        self.virtual_keyboard = VirtualKeyboard()
 
         """ master phase variable """
         self.master_phase = -2
@@ -927,14 +930,15 @@ class ShugrPiOS:
 
     def setup_network_room(self):
         ui_group = pygame.sprite.Group()
-        self.connect_ui = UiElement("Connect", half_display_x, 500, 0, 0, size=10, font=retro_font, group=ui_group, func=lambda: print("HI"))
+        self.connect_ui = UiElement("Connect", half_display_x, 100, 0, 0, size=10, font=retro_font, group=ui_group, func=lambda: print("HI"))
+        self.text_fields["ssid"] = TextField(half_display_x, 200, 1, 0, 200, 30, "Enter your SSID here", group=ui_group, keyboard=self.virtual_keyboard)
 
         self.create_ui_manager("network", ui_group)
 
     def setup_power_room(self):
         ui_group = pygame.sprite.Group()
         self.power_ui = UiElement("Power Off", 100, 100, 0, 0, size=10, font=retro_font, group=ui_group, func=self.linux.power_off)
-        self.reboot_ui = UiElement("Reboot", 100, 200, 1, 0, size=10, font=retro_font, group=ui_group, func=lambda: self.shutdown(-1))
+        self.reboot_ui = UiElement("Reboot", 100, 200, 1, 0, size=10, font=retro_font, group=ui_group, func=self.linux.reboot)
 
         self.create_ui_manager("power", ui_group)
 
@@ -1066,7 +1070,7 @@ class ShugrPiOS:
                         self.virtual_keyboard.toggle()
 
                     if self.virtual_keyboard.toggled:
-                        self.virtual_keyboard.handle_event(event)
+                        self.virtual_keyboard.handle_event(event, self.text_fields)
                         return
 
                     # dialog menu

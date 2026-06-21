@@ -41,6 +41,8 @@ class VirtualKeyboard:
         self.target_scroll = 100
         self.scroll = 0
 
+        self.last_key = None
+
     def _setup_keys(self):
         self.keys = [chr(i) for i in range(0, 1000) if chr(i).isascii() and chr(i).isprintable()]
         self.keys = self.keys[33:] + self.keys[:32]
@@ -60,7 +62,7 @@ class VirtualKeyboard:
                 row += 1
                 col = 0
 
-        btn = UiElement("Backspace", self.x_start + 60, 30 + (self.size + self.padding) * (row + 1),row + 1, 0,
+        btn = UiElement("Backspace", self.x_start + 60, 30 + (self.size + self.padding) * (row + 1), row, col,
                         group=self.button_group, size=self.size, font=retro_font, centered=True, func=self._return_backspace)
         btn_rect = btn.rect.copy().inflate(-10, -10)
         self.button_rects.append(btn_rect)
@@ -73,12 +75,10 @@ class VirtualKeyboard:
         btn_mgr = self.button_manager
         current_y = btn_mgr.y_index
         lookup_pos = btn_mgr.x_index + sum([len(btn_mgr.master_ui_dict[i]) for i in range(current_y)])
-        key = self.keys[lookup_pos]
-        print(key)
-        return key
+        self.last_key = self.keys[lookup_pos]
 
     def _return_backspace(self):
-        return "BACKSPACE"
+        self.last_key = "BACKSPACE"
 
     def toggle(self):
         self.toggled = not self.toggled
@@ -95,7 +95,7 @@ class VirtualKeyboard:
         if self.scroll != self.target_scroll:
             self.scroll = ease_out_to(self.scroll, self.target_scroll, 0.15 * dt)
 
-    def handle_event(self, event):
+    def handle_event(self, event, text_fields:dict=None):
         if event.key == pygame.K_UP:
             self.button_manager.change_row(-1)
         if event.key == pygame.K_DOWN:
@@ -106,6 +106,9 @@ class VirtualKeyboard:
             self.button_manager.change_col(1)
         if event.key == pygame.K_RETURN:
             self.button_manager.action()
+            if text_fields is not None:
+                selected_text_field = [v for v in list(text_fields.values()) if v.true_selected][0]
+                selected_text_field.update_text(self.last_key)
 
     def draw(self, display):
         display.blit(self.image, (self.rect.x, self.rect.y + self.scroll))

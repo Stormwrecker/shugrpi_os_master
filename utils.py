@@ -610,6 +610,66 @@ class DialogMenu:
             display.blit(self.surf, self.rect)
 
 
+# text field
+class TextField(pygame.sprite.Sprite):
+    def __init__(self, x, y, row, col, w, h, default_text, group, keyboard):
+        pygame.sprite.Sprite.__init__(self, group)
+
+        self.size = h//2
+        self.text = Text(default_text, self.size//2, self.size//2, WHITE, self.size, retro_font, False)
+
+        self.text_input = ""
+
+        self.row = row
+        self.col = col
+        self.default_text = default_text
+
+        self.image = pygame.Surface((w, h)).convert()
+        self.image.fill(GRAY)
+        self.actual_rect = self.image.get_rect()
+        self.actual_rect.center = (x, y)
+
+        self.keyboard = keyboard
+
+        self.selected = False
+        self.true_selected = False
+
+        self.max_chars = (w - self.size//2)//self.size
+        self.scroll = 0
+
+    def update(self, dt, col, row):
+        self.selected = False
+        if row == self.row and col == self.col:
+            self.selected = True
+
+        if self.selected:
+            self.true_selected = True
+
+        if row is not None and col is not None:
+            if not self.selected:
+                self.true_selected = False
+
+    def action(self):
+        self.keyboard.toggle()
+
+    def update_text(self, k):
+        if k != "BACKSPACE":
+            self.text_input += k
+        else:
+            self.text_input = self.text_input[:len(self.text_input) - 1]
+        self.text.set_text(self.text_input)
+        if len(self.text_input) > self.max_chars:
+            self.scroll = -(len(self.text_input) - 1 - self.max_chars) * self.size
+            self.text.rect.x = self.scroll
+
+    def draw(self, display):
+        self.image.fill(GRAY)
+        self.text.draw(self.image)
+        display.blit(self.image, self.actual_rect)
+        if self.true_selected:
+            pygame.draw.rect(display, WHITE, self.actual_rect, 4, border_radius=3)
+
+
 """ Room Utilities """
 
 # room object
@@ -731,6 +791,7 @@ __all__ = ["CompatibilityManager",
            "retro_font",
            "UiElement",
            "UiManager",
+           "TextField",
            "Notification",
            "DialogMenu",
            "Room",

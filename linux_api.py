@@ -59,6 +59,10 @@ class Linux:
         self.logger.info("Powering off device...")
         self._run(["sudo", "poweroff"])
 
+    def reboot(self):
+        self.logger.info("Rebooting OS...")
+        self._run(["pkill", "Xorg"])
+
     """runners"""
     def _call(self, proc):
         if self.is_shugrpi:
