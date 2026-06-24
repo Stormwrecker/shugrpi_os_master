@@ -122,14 +122,32 @@ class AudioManager:
             pygame.mixer.stop()
 
 
+# network management
+class NetworkManager:
+    def __init__(self, linux):
+        self.ssid = None
+        self.psk_key = None
+        self.status = 0
+        self.signal_strength = 0
+        self.linux = linux
+
+    def connect_to_wifi(self, ssid, psk_key):
+        self.linux.connect_to_wifi(ssid.value, psk_key.value)
+
+
 """ Image Utilities """
 
-def load_image(path, alpha=False):
+def load_image(path):
     try:
-        if not alpha:
-            return pygame.image.load(path).convert()
+        image = pygame.image.load(path)
+
+        if image.get_alpha():
+            image = image.convert_alpha()
         else:
-            return pygame.image.load(path).convert_alpha()
+            image = image.convert()
+
+        return image
+
     except Exception as e:
         logger.warning(f"unable to load '{path}': {e}")
         return pygame.image.load(os.path.join(base_path, "images", "fail_load.png")).convert()
@@ -138,12 +156,12 @@ def load_image(path, alpha=False):
 def preload_images():
     master_images = {}
     image_path = os.path.join(base_path, "images")
-    alpha_images = ["icon", "battery"]
+
     for temp_file in os.listdir(image_path):
         temp_path = os.path.join(image_path, temp_file)
         if os.path.isfile(temp_path):
-            do_alpha = True if temp_file.split(".")[0] in alpha_images else False
-            master_images[temp_file.split(".")[0]] = load_image(os.path.join(image_path, temp_file), do_alpha)
+            master_images[temp_file.split(".")[0]] = load_image(os.path.join(image_path, temp_file))
+
     return master_images
 
 
@@ -616,13 +634,13 @@ class TextField(pygame.sprite.Sprite):
         pygame.sprite.Sprite.__init__(self, group)
 
         self.size = h//2
-        self.text = Text(default_text, self.size//2, self.size//2, WHITE, self.size, retro_font, False)
+        self.text = Text("", self.size//2, self.size//2, WHITE, self.size, retro_font, False)
+        self.default_text = Text(default_text, w//2, h//2, (180, 180, 180), self.size*2//3 - 2, retro_font, True)
 
         self.text_input = ""
 
         self.row = row
         self.col = col
-        self.default_text = default_text
 
         self.image = pygame.Surface((w, h)).convert()
         self.image.fill(GRAY)
@@ -636,6 +654,8 @@ class TextField(pygame.sprite.Sprite):
 
         self.max_chars = (w - self.size//2)//self.size
         self.scroll = 0
+
+        self.value = ""
 
     def update(self, dt, col, row):
         self.selected = False
@@ -657,15 +677,22 @@ class TextField(pygame.sprite.Sprite):
             self.text_input += k
         else:
             self.text_input = self.text_input[:len(self.text_input) - 1]
+
         self.text.set_text(self.text_input)
         if len(self.text_input) > self.max_chars:
             self.scroll = -(len(self.text_input) - 1 - self.max_chars) * self.size
             self.text.rect.x = self.scroll
 
+        self.value = self.text_input
+
     def draw(self, display):
         self.image.fill(GRAY)
-        self.text.draw(self.image)
+        if len(self.text_input) or self.true_selected:
+            self.text.draw(self.image)
+        else:
+            self.default_text.draw(self.image)
         display.blit(self.image, self.actual_rect)
+        pygame.draw.rect(display, GRAY, self.actual_rect, 4)
         if self.true_selected:
             pygame.draw.rect(display, WHITE, self.actual_rect, 4, border_radius=3)
 
@@ -776,6 +803,7 @@ class SystemClock:
 
 __all__ = ["CompatibilityManager",
            "AudioManager",
+           "NetworkManager",
            "load_image",
            "check_internet_status",
            "get_font",

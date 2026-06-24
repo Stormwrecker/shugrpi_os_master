@@ -12,6 +12,8 @@ from constants import *
 # virtual keyboard object
 class VirtualKeyboard:
     def __init__(self):
+        self.um = None
+
         self._setup_keys()
 
         self.width = DISPLAY_WIDTH - 50
@@ -36,16 +38,27 @@ class VirtualKeyboard:
 
         self.button_image = self.image.copy()
         self.button_image.set_colorkey(BLACK)
+        self.button_image.fill(BLACK)
+        for rect in self.button_shadow_rects:
+            pygame.draw.rect(self.button_image, (40, 40, 40), rect, border_radius=3)
+        for rect in self.button_rects:
+            pygame.draw.rect(self.button_image, (20, 20, 20), rect, border_radius=3)
+
+        self.ui_image = self.image.copy()
+        self.ui_image.set_colorkey(BLACK)
 
         self.toggled = False
         self.target_scroll = 100
         self.scroll = 0
+
+        self.clicking = False
 
         self.last_key = None
 
     def _setup_keys(self):
         self.keys = [chr(i) for i in range(0, 1000) if chr(i).isascii() and chr(i).isprintable()]
         self.keys = self.keys[33:] + self.keys[:32]
+        self.keys.remove(" ")
 
     def _setup_buttons(self):
         row = 0
@@ -62,8 +75,21 @@ class VirtualKeyboard:
                 row += 1
                 col = 0
 
-        btn = UiElement("Backspace", self.x_start + 60, 30 + (self.size + self.padding) * (row + 1), row, col,
+        col += 1
+        btn = UiElement("Space", self.x_start + (self.size + self.padding) * col, 20 + (self.size + self.padding) * row, row, col-1,
+                        group=self.button_group, size=self.size, font=retro_font, centered=True, func=self._return_space)
+        btn_rect = btn.rect.copy().inflate(-10, -10)
+        self.button_rects.append(btn_rect)
+
+        col += 1
+        btn = UiElement("←", self.x_start + (self.size + self.padding) * (col+1), 20 + (self.size + self.padding) * row, row, col-1,
                         group=self.button_group, size=self.size, font=retro_font, centered=True, func=self._return_backspace)
+        btn_rect = btn.rect.copy().inflate(-10, -10)
+        self.button_rects.append(btn_rect)
+
+        col += 1
+        btn = UiElement("Enter", self.x_start + (self.size + self.padding) * (col+2), 20 + (self.size + self.padding) * row, row, col-1,
+                        group=self.button_group, size=self.size, font=retro_font, centered=True, func=self.toggle)
         btn_rect = btn.rect.copy().inflate(-10, -10)
         self.button_rects.append(btn_rect)
 
@@ -77,10 +103,14 @@ class VirtualKeyboard:
         lookup_pos = btn_mgr.x_index + sum([len(btn_mgr.master_ui_dict[i]) for i in range(current_y)])
         self.last_key = self.keys[lookup_pos]
 
+    def _return_space(self):
+        self.last_key = " "
+
     def _return_backspace(self):
         self.last_key = "BACKSPACE"
 
     def toggle(self):
+        self.last_key = ""
         self.toggled = not self.toggled
         if self.toggled:
             self.button_manager.reset()
@@ -95,7 +125,7 @@ class VirtualKeyboard:
         if self.scroll != self.target_scroll:
             self.scroll = ease_out_to(self.scroll, self.target_scroll, 0.15 * dt)
 
-    def handle_event(self, event, text_fields:dict=None):
+    def handle_event(self, event, text_fields=None):
         if event.key == pygame.K_UP:
             self.button_manager.change_row(-1)
         if event.key == pygame.K_DOWN:
@@ -106,20 +136,20 @@ class VirtualKeyboard:
             self.button_manager.change_col(1)
         if event.key == pygame.K_RETURN:
             self.button_manager.action()
+            self.clicking = True
             if text_fields is not None:
-                selected_text_field = [v for v in list(text_fields.values()) if v.true_selected][0]
-                selected_text_field.update_text(self.last_key)
+                selected_fields = [v for v in list(text_fields.values()) if v.true_selected]
+                if len(selected_fields) > 0:
+                    selected_text_field = selected_fields[0]
+                    selected_text_field.update_text(self.last_key)
 
     def draw(self, display):
         display.blit(self.image, (self.rect.x, self.rect.y + self.scroll))
-
-        self.button_image.fill(BLACK)
-        for rect in self.button_shadow_rects:
-            pygame.draw.rect(self.button_image, (40, 40, 40), rect, border_radius=3)
-        for rect in self.button_rects:
-            pygame.draw.rect(self.button_image, (20, 20, 20), rect, border_radius=3)
-        self.button_manager.draw(self.button_image)
         display.blit(self.button_image, (self.rect.x, self.rect.y + self.scroll))
+
+        self.ui_image.fill(BLACK)
+        self.button_manager.draw(self.ui_image)
+        display.blit(self.ui_image, (self.rect.x, self.rect.y + self.scroll))
 
 
 __all__ = ["VirtualKeyboard"]

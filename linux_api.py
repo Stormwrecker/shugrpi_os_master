@@ -19,6 +19,22 @@ class Linux:
             self.logger.warning("Cannot set time on non-SHUGRPi device")
         return code
 
+    """network commands"""
+    def connect_to_wifi(self, ssid, psk_key):
+        self.logger.info(f"Attempting a connection to '{ssid}'...")
+        con_name = "shugrpi-wifi"
+        make_profile_proc = self._run(["nmcli", "con", "add", "type", "wifi", "ifname"
+                                       "con-name", con_name, "ssid", ssid])
+        set_security_proc = self._run(["nmcli", "con", "mod", con_name, "wifi-sec.key-mgmt", "wpa-psk"])
+        set_psk_proc = self._run(["nmcli", "con", "mod", con_name, "wifi-sec.key-psk", psk_key])
+        all_procs = [make_profile_proc, set_security_proc, set_psk_proc]
+        if 1 not in all_procs and -1 not in all_procs:
+            self.logger.info(f"Connected successfully to '{ssid}' using the password '{len(psk_key) * '*'}'")
+            return 0
+        else:
+            self.logger.error(f"Failed to connect to '{ssid}' using the password '{len(psk_key) * '*'}'")
+            return 1
+
     """git commands"""
     def git_clone(self, repo="https://github.com/Stormwrecker/shugrpi_os_master.git"):
         return self._call(["git", "clone", repo])

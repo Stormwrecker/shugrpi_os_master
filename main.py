@@ -10,6 +10,7 @@ All Rights Reserved
 from utils import *
 from constants import *
 from linux_api import *
+from installation_api import *
 from virtual_keyboard import *
 import os
 import sys
@@ -44,8 +45,6 @@ import time
 import json
 import math
 import random
-from shutil import rmtree
-
 
 # initialize pygame with necessary setups
 def init_pygame():
@@ -361,12 +360,19 @@ class Game(pygame.sprite.Sprite):
 
         self.executable = configs["executable"]
         self.exec_type = self.executable.split(".")[1]
+
         self.use_venv = configs.get("use_venv")
         self.python_version = configs.get("python_version")
-        if configs.get("thumbnail"):
-            temp_thumb = os.path.join(self.root_path, configs["thumbnail"])
+        self.requirements = configs.get("requirements")
+
+        if self.use_venv:
+            self.python_exec = os.path.join(self.root_path, ".venv", "Scripts" if not is_shugrpi else "bin", "python.exe" if not is_shugrpi else "python")
         else:
-            temp_thumb = None
+            self.python_exec = "python"
+
+        self.installed = self.check_install()
+
+        temp_thumb = os.path.join(self.root_path, configs["thumbnail"]) if configs.get("thumbnail") else None
         self.thumbnail = load_thumbnail(temp_thumb, master_images["fail_load"])
 
     def update(self, dt, index, angle, wheel_selected, scroll):
@@ -412,13 +418,17 @@ class Game(pygame.sprite.Sprite):
             self.image.set_colorkey(WHITE)
             self.rect = self.image.get_rect(center=self.rect.center)
 
+    def check_install(self):
+        installed = True
+        if self.use_venv is not None:
+            if not os.path.exists(self.python_exec):
+                installed = False
+
+        return installed
+
     def prepare_executable(self):
         if self.exec_type == "py":
-            if self.use_venv:
-                python_exec = os.path.join(self.root_path, ".venv", "Scripts" if not is_shugrpi else "bin", "python")
-            else:
-                python_exec = "python"
-            processes = [python_exec, self.executable]
+            processes = [self.python_exec, self.executable]
             return processes, self.root_path, os.environ.copy()
         else:
             return self.executable, self.root_path, os.environ.copy()
@@ -427,12 +437,19 @@ class Game(pygame.sprite.Sprite):
         if self.selected:
             pygame.draw.rect(display, WHITE,
                              (self.rect.x - 3, self.rect.y - 3, self.rect.width + 6, self.rect.height + 6), 6)
+        if not self.installed:
+            r = 8
+            pygame.draw.circle(self.image, ORANGE, (self.rect.width - r*2, r*2), r)
         display.blit(self.image, self.rect)
 
 
 # game manager
 class GameManager:
     def __init__(self):
+        self.all_games_data = []
+        self.log_data = []
+
+    def reset(self):
         self.all_games_data = []
         self.log_data = []
 
@@ -470,56 +487,75 @@ class GameManager:
             # flags for logging
             is_valid = False
             is_config = False
+            is_installed = False
+
+            # configuration data for games
+            config_data = DEFAULT_GAME_CONFIG.copy()
+
+            # get config file
+            config_file = os.path.join(path, d, "game_config.json")
+
+            # pre-read configuration file if existing
+            if os.path.exists(config_file):
+                with open(config_file, "r") as f:
+                    config_data = json.load(f)
 
             # possible game paths
-            main_game_py = os.path.join(path, d, "main.py")
-            main_game_bin = os.path.join(path, d, "main.bin")
+            if config_data.get("executable"):
+                main_game = os.path.join(path, d, *os.path.split(config_data["executable"]))
+            else:
+                for i in ["py", "bin"]:
+                    main_game = os.path.join(path, d, f"main.{i}")
+                    if os.path.exists(main_game):
+                        break
 
             # get game app type
             game_app = None
-            if os.path.exists(main_game_py):
-                game_app = main_game_py
-            elif os.path.exists(main_game_bin):
-                game_app = main_game_bin
+            if os.path.exists(main_game):
+                game_app = main_game
+                # set config name to whatever the folder name is
+                if config_data["name"] == DEFAULT_GAME_CONFIG["name"]:
+                    config_data["name"] = d.title()
             else:
                 # set padding
                 self.padding = max(self.padding, len(d))
                 self.paddings.append(len(d))
 
                 # add folder to log
-                self.log_data.append(f"|  {d}^{is_valid}+{is_config}   |")
-
+                self.log_data.append(
+                    f"|  {d}^{is_valid}+N/A    +N/A        |")
                 continue
-
-            # configuration data for games
-            config_data = DEFAULT_GAME_CONFIG.copy()
 
             # if a valid game is encountered
             if game_app:
                 is_valid = True
 
-                # get config file
-                config_file = os.path.join(path, d, "game_config.json")
-
                 # if file does not exist, make one
                 if not os.path.exists(config_file):
                     with open(config_file, "w") as f:
-                        json.dump(DEFAULT_GAME_CONFIG, f)
-
-                # if file does exist, read it
-                else:
-                    with open(config_file, "r") as f:
-                        config_data = json.load(f)
+                        json.dump(config_data, f)
 
                 # check if configurations are custom
-                if config_data != DEFAULT_GAME_CONFIG:
-                    is_config = True
+                for k, v in DEFAULT_GAME_CONFIG.items():
+                    if k != "name":
+                        if config_data[k] != v:
+                            is_config = True
 
-                # set configurations
+                # set necessary configurations
                 config_data["root_path"] = os.path.join(path, d)
                 config_data["executable"] = game_app
                 game_info = get_game_info(os.path.join(path, d), game_app)
 
+                # check if game has been installed based on venv's presence
+                venv_path = os.path.join(path, d, ".venv")
+                requirements_path = os.path.join(path, d, "requirements.txt")
+                if os.path.exists(venv_path) or not config_data.get("use_venv"):
+                    is_installed = True
+                elif not os.path.exists(venv_path) and config_data.get("use_venv"):
+                    if os.path.exists(requirements_path):
+                        config_data["requirements"] = requirements_path
+
+                # set unneccessary configurations
                 config_data["size"] = game_info["size"]
                 config_data["last_played_raw"] = game_info["last_played_raw"]
                 config_data["last_played"] = game_info["last_played"]
@@ -532,7 +568,7 @@ class GameManager:
                 self.all_games_data.append(config_data)
 
             # add data to log table
-            self.log_data.append(f"|  {d}^{is_valid} +{is_config}   " + (" |" if is_config else "|"))
+            self.log_data.append(f"|  {d}^{is_valid} +{is_config}  +" + (" " if is_config else "") + f"{is_installed}" + (" " if is_installed else "") + "      |")
 
         # generate summary table in logging
         self._generate_log_table()
@@ -545,7 +581,7 @@ class GameManager:
             step_1 = step_0.replace("^", " " * (26 - self.paddings[i]))
             self.log_data[i] = step_1.replace("+", " " * 8)
 
-        header = "*---Folder" + "-" * (self.padding - 2) + "Game" + "-" * 8 + "Config---*"
+        header = "*---Folder" + "-" * (self.padding - 2) + "Game" + "-" * 8 + "Config" + "-" * 8 + "Installed" + "-" * 4 + "*"
         logger.info("Detected the folders listed below:".center(len(header)))
         logger.info(header)
 
@@ -805,33 +841,34 @@ class ShugrPiOS:
         self.is_shugrpi = is_shugrpi
         self.linux = linux
 
-        """ window/display setup """
+        # window/display setup
         self.screen = screen
         self.display = pygame.Surface((DISPLAY_WIDTH, DISPLAY_HEIGHT)).convert()
         self.display_info = pygame.display.Info()
         logger.info("Using video driver: " + pygame.display.get_driver())
 
-        """ time setup """
+        # time setup
         self.clock = pygame.time.Clock()
         self.timers = {}
         self.pause = False
         self.current_time = current_time
         self.sys_clock = SystemClock(self.linux, self.current_time)
 
-        """ timers setup """
+        # timers setup
         self.timers["pre_init"] = Timer(60)
         self.timers["logo"] = Timer(120)
         self.timers["start"] = Timer(180)
 
-        """ manager setup """
+        # manager setup
         self.am = AudioManager(logger, self.is_shugrpi)
         self.gm = GameManager()
+        self.nm = NetworkManager(self.linux)
 
-        """ games setup """
+        # games setup
         self.master_games_path = os.path.join(base_path, GAME_PATH)
 
-        """ images setup """
-        self.battery_image = pygame.transform.scale(self.get_image("battery", True), (30, 30))
+        # images setup
+        self.battery_image = pygame.transform.scale(self.get_image("battery"), (30, 30))
         self.fail_image = master_images["fail_load"]
         self.original_logo_img = self.get_image("logo")
         self.logo_img = pygame.transform.scale(self.original_logo_img, (int(165 * 3), int(165 * 3)))
@@ -839,30 +876,30 @@ class ShugrPiOS:
         self.logo_alpha = 0
         self.logo_img.set_alpha(self.logo_alpha)
 
-        """ utility setup """
+        # utility setup
         self.internet_connection = check_internet_status()
         self.stop_event = threading.Event()
         self.wifi_lock = threading.Lock()
         self.wifi_thread = threading.Thread(name="SHUGRPi Internet Updater", target=self.update_internet_connection, daemon=True)
         self.wifi_thread.start()
 
-        """virtual keyboard"""
+        # virtual keyboard
         self.virtual_keyboard = VirtualKeyboard()
 
-        """text field UI setup"""
+        # text field UI setup
         self.text_fields = {}
 
-        """ room setup """
+        # room setup
         self.rooms = {}
         self.ui_managers = {}
 
-        """ setup UI for rooms """
+        # setup UI for rooms
         self.setup_game_room()
         self.setup_clock_room()
         self.setup_network_room()
         self.setup_power_room()
 
-        """ universal UI setup """
+        # universal UI setup
         self.banner_top = pygame.Surface((DISPLAY_WIDTH, 60)).convert()
         self.banner_top.fill(GRAY)
         self.banner_top_rect = self.banner_top.get_rect()
@@ -876,12 +913,12 @@ class ShugrPiOS:
         self.dialog_menu = DialogMenu(self.screen, "Welcome to the SHUGRPi!", has_ui=True)
         self.notification = Notification(None)
 
-        """ effects setup """
+        # effects setup
         self.curtain = Curtain()
         self.curtain.set_color(DARKER_GRAY)
         self.floating_logo = FloatingLogo()
 
-        """ create rooms """
+        # create rooms
         self.create_room("games", 0, 0, self.ui_managers["games"])
         self.create_room("clock", 0, -1, self.ui_managers["clock"])
         self.create_room("network", 0, -1, self.ui_managers["network"])
@@ -890,10 +927,13 @@ class ShugrPiOS:
         self.rm = RoomManager(self.rooms)
         self.current_room = self.rm.current_room
 
-        """ master phase variable """
+        # installation setup
+        self.installation = False
+
+        # master phase variable
         self.master_phase = -2
 
-        """ master running variable """
+        # master running variable
         self.running = True
         self.running_game = [None, None]
         self.start_game = False
@@ -922,7 +962,7 @@ class ShugrPiOS:
         self.hour_ui = UiElement(self.sys_clock.hour, half_display_x - 120, half_display_y - 50, 0, 1, size=10, font=retro_font, group=ui_group, func= lambda: self.rooms["clock"][2].change_col(1))
         self.minute_ui = UiElement(self.sys_clock.minute, half_display_x - 80, half_display_y - 50, 0, 2, size=10, font=retro_font, group=ui_group, func= lambda: self.rooms["clock"][2].change_col(1))
         self.round_clock_ui = UiElement(self.sys_clock.round_clock_labels[int(self.sys_clock.round_clock)], half_display_x, half_display_y + 50, 1, 0, size=10, font=retro_font, group=ui_group, func=self.switch_time_format)
-        self.back_button = UiElement("Back", DISPLAY_WIDTH - 50, DISPLAY_HEIGHT - 20, 2, 0, group=ui_group, func=lambda: self.switch_room("games"))
+        back_btn = self.add_back_button(ui_group)
 
         self.colon = Text(":", half_display_x - 100, half_display_y - 50, WHITE, 10, retro_font)
 
@@ -930,8 +970,10 @@ class ShugrPiOS:
 
     def setup_network_room(self):
         ui_group = pygame.sprite.Group()
-        self.connect_ui = UiElement("Connect", half_display_x, 100, 0, 0, size=10, font=retro_font, group=ui_group, func=lambda: print("HI"))
-        self.text_fields["ssid"] = TextField(half_display_x, 200, 1, 0, 200, 30, "Enter your SSID here", group=ui_group, keyboard=self.virtual_keyboard)
+        self.connect_ui = UiElement("Connect", half_display_x, 100, 0, 0, size=10, font=retro_font, group=ui_group, func=lambda: self.nm.connect_to_wifi(self.text_fields["ssid"], self.text_fields["psk_key"]))
+        self.text_fields["ssid"] = TextField(half_display_x - 125, 200, 1, 0, 200, 30, "Enter your SSID here", group=ui_group, keyboard=self.virtual_keyboard)
+        self.text_fields["psk_key"] = TextField(half_display_x + 125, 200, 1, 1, 200, 30, "Enter your password here", group=ui_group, keyboard=self.virtual_keyboard)
+        back_btn = self.add_back_button(ui_group)
 
         self.create_ui_manager("network", ui_group)
 
@@ -939,8 +981,13 @@ class ShugrPiOS:
         ui_group = pygame.sprite.Group()
         self.power_ui = UiElement("Power Off", 100, 100, 0, 0, size=10, font=retro_font, group=ui_group, func=self.linux.power_off)
         self.reboot_ui = UiElement("Reboot", 100, 200, 1, 0, size=10, font=retro_font, group=ui_group, func=self.linux.reboot)
+        back_btn = self.add_back_button(ui_group)
 
         self.create_ui_manager("power", ui_group)
+
+    def add_back_button(self, ui_group):
+        back_button = UiElement("Back", DISPLAY_WIDTH - 50, DISPLAY_HEIGHT - 20, 2, 0, group=ui_group, func=lambda: self.switch_room("games"))
+        return back_button
 
     """ main runner """
     def run(self):
@@ -1228,16 +1275,19 @@ class ShugrPiOS:
 
     """ game utilities """
     def fade_to_game(self):
-        self.curtain.set_color(DARK_GRAY)
-        self.curtain.target_alpha = 255
-        self.start_game = True
-        self.am.stop_music()
+        current_game = self.game_wheel.lowest_game
+        if current_game.installed:
+            self.curtain.set_color(DARK_GRAY)
+            self.curtain.target_alpha = 255
+            self.start_game = True
+            self.am.stop_music()
+        else:
+            self.install_game()
 
     def execute_game(self):
+        proc, path, env = self.game_wheel.prepare_game()
         if audio_driver:
             pygame.mixer.pause()
-
-        proc, path, env = self.game_wheel.prepare_game()
         self.running_game[0] = self.game_wheel.lowest_game.name
 
         try:
@@ -1266,7 +1316,7 @@ class ShugrPiOS:
             self.notification.reset(f"`{title}` crashed due to: `{simple_error}`")
 
         if is_error:
-            logger.error(f"`{self.game_wheel.lowest_game.name}` has crashed due to the following error:\n" + stderr)
+            logger.error(f"`{self.game_wheel.lowest_game.name}` has crashed due to the following error:\n" + stderr.strip())
 
         else:
             logger.info(f"`{self.game_wheel.lowest_game.name}` has terminated successfully")
@@ -1285,8 +1335,13 @@ class ShugrPiOS:
 
         self.clock.tick(FPS)
 
+    def install_game(self):
+        current_game = self.game_wheel.lowest_game
+        self.installation = Installation(current_game, logger, self.internet_connection)
+        self.installation.start()
+
     """ various utilities """
-    def get_image(self, img, alpha=False, colorkey=None):
+    def get_image(self, img):
         try:
             return master_images[img]
         except:
@@ -1320,6 +1375,7 @@ class ShugrPiOS:
         if event.key == pygame.K_BACKSPACE:
             self.switch_room("games")
 
+    """time utilities"""
     def set_time(self):
         self.sys_clock.set_time(self.hour_ui.label + ":" + self.minute_ui.label)
 
@@ -1360,12 +1416,25 @@ class ShugrPiOS:
     """ main shutdown """
     def shutdown(self, code=0, system=False):
         logger.info("Shutting down...")
+
+        # shutdown any running game
         if self.running_game[1] is not None:
             self.running_game.terminate()
+
+        # cancel any ongoing game installations
+        if self.installation:
+            if not self.installation.complete:
+                self.installation._bailout()
+
+        # quit pygame
         self.running = False
         pygame.quit()
+
+        # stop threads
         self.stop_event.set()
         self.wifi_thread.join()
+
+        # final exit
         logger.info("Shutdown complete!")
         sys.exit(code)
 
