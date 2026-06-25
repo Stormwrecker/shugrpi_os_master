@@ -348,6 +348,21 @@ class Game(pygame.sprite.Sprite):
         self.index = index
         self.selected = False
 
+        self.original_gray_surf = pygame.Surface((300, 300)).convert_alpha()
+        self.original_gray_surf.set_colorkey(BLACK)
+        self.gray_surf = self.original_gray_surf.copy()
+        self.gray_surf.fill(DARK_GRAY)
+        self.gray_alpha = 150
+        self.gray_surf.set_alpha(self.gray_alpha)
+
+        self.warning_image = master_images["warning"]
+        self.warning_image = pygame.transform.smoothscale_by(self.warning_image, .5)
+
+        self.installed = self.check_install()
+        self.install_in_progress = False
+        self.install_step = 0
+        self.status_label = Text("", self.rect.centerx, self.rect.centery, WHITE, 8, retro_font, True)
+
         self.update(1, self.index, self.angle, True, [0, 0])
 
     def _init_metadata(self, configs):
@@ -370,10 +385,29 @@ class Game(pygame.sprite.Sprite):
         else:
             self.python_exec = "python"
 
-        self.installed = self.check_install()
-
         temp_thumb = os.path.join(self.root_path, configs["thumbnail"]) if configs.get("thumbnail") else None
         self.thumbnail = load_thumbnail(temp_thumb, master_images["fail_load"])
+
+    def reset(self, configs, index, x, y, wheel_rect, angle):
+        self._init_metadata(configs)
+
+        self.z_depth = 0
+        self.wheel_rect = wheel_rect
+
+        self.base_angle = angle
+        self.angle = angle
+
+        self.original_image = pygame.transform.smoothscale(self.thumbnail, (225, 300))
+        self.image = pygame.transform.scale(self.original_image, (150, 200))
+        self.rect = self.image.get_rect()
+        self.rect.center = (x, y)
+
+        self.grow = self.image.get_width() - self.original_image.get_width()
+
+        self.index = index
+        self.selected = False
+
+        self.update(1, self.index, self.angle, True, [0, 0])
 
     def update(self, dt, index, angle, wheel_selected, scroll):
         current_angle = self.base_angle + math.radians(angle)
@@ -390,6 +424,24 @@ class Game(pygame.sprite.Sprite):
             self.selected = False
 
         self.scale_image(self.selected, dt)
+
+        if self.install_in_progress:
+            self.status_label.rect.center = self.rect.center
+
+    def update_before_install(self):
+        self.install_in_progress = True
+
+    def update_during_install(self, step):
+        if step != self.install_step:
+            msg = f"Installing ({step}/3)..."
+            self.status_label.set_text(msg)
+            self.status_label.rect.center = self.rect.center
+            self.install_step = step
+
+    def update_after_install(self, success):
+        self.install_in_progress = False
+        if success:
+            self.installed = True
 
     def scale_image(self, selected, dt):
         current_width = self.image.get_width()
@@ -417,14 +469,10 @@ class Game(pygame.sprite.Sprite):
             self.image = pygame.transform.smoothscale(self.original_image, (size_x, size_y))
             self.image.set_colorkey(WHITE)
             self.rect = self.image.get_rect(center=self.rect.center)
+            self.gray_surf = pygame.transform.scale(self.original_gray_surf, self.rect.size)
 
     def check_install(self):
-        installed = True
-        if self.use_venv is not None:
-            if not os.path.exists(self.python_exec):
-                installed = False
-
-        return installed
+        return (os.path.exists(self.python_exec) and self.use_venv) or not self.use_venv
 
     def prepare_executable(self):
         if self.exec_type == "py":
@@ -433,14 +481,19 @@ class Game(pygame.sprite.Sprite):
         else:
             return self.executable, self.root_path, os.environ.copy()
 
-    def draw(self, display):
-        if self.selected:
+    def draw(self, display, toggle):
+        if self.selected and not toggle:
             pygame.draw.rect(display, WHITE,
                              (self.rect.x - 3, self.rect.y - 3, self.rect.width + 6, self.rect.height + 6), 6)
-        if not self.installed:
-            r = 8
-            pygame.draw.circle(self.image, ORANGE, (self.rect.width - r*2, r*2), r)
         display.blit(self.image, self.rect)
+        if self.install_in_progress:
+            self.gray_surf.fill(DARK_GRAY)
+            self.gray_surf.set_alpha(self.gray_alpha)
+            display.blit(self.gray_surf, self.rect)
+            self.status_label.draw(display)
+
+        if not self.install_in_progress and not self.installed:
+            display.blit(self.warning_image, (self.rect.right - 35, self.rect.top + 5))
 
 
 # game manager
@@ -625,6 +678,7 @@ class GameWheelUi(UiElement):
         self.num_items = len(self.all_games_data)
         self.angle_increment = 360 / self.num_items if self.num_items > 0 else 0
 
+        self.first_load = True
         self.reload_games()
 
         # scroll values
@@ -648,6 +702,8 @@ class GameWheelUi(UiElement):
 
         self.curtain_alpha = 0
         self.curtain.set_alpha(self.curtain_alpha)
+
+        self.game_menu_toggled = False
 
     def setup_ellipses(self):
         self.shadow_image = pygame.Surface(self.shadow_rect.size).convert_alpha()
@@ -675,13 +731,31 @@ class GameWheelUi(UiElement):
         self.target_angle = 0
         self.lowest_game = None
 
-        # add games to wheel
-        self.games = []
-        for index, data in enumerate(self.all_games_data):
-            self.item_angle = math.radians(self.angle_increment * -index + 90)
-            x = int(math.cos(self.item_angle) * self.rect.width) + self.rect.centerx
-            y = int(math.sin(self.item_angle) * self.rect.height) + self.rect.centery
-            self.games.append(Game(data, index, x, y, self.rect, self.item_angle))
+        # first time loading games
+        if self.first_load:
+            # add games to wheel
+            self.games = []
+            for index, data in enumerate(self.all_games_data):
+                self.item_angle = math.radians(self.angle_increment * -index + 90)
+                x = int(math.cos(self.item_angle) * self.rect.width) + self.rect.centerx
+                y = int(math.sin(self.item_angle) * self.rect.height) + self.rect.centery
+                self.games.append(Game(data, index, x, y, self.rect, self.item_angle))
+            self.first_load = False
+
+        # do an actual reload
+        else:
+            temp_games = []
+            for index, data in enumerate(self.all_games_data):
+                self.item_angle = math.radians(self.angle_increment * -index + 90)
+                x = int(math.cos(self.item_angle) * self.rect.width) + self.rect.centerx
+                y = int(math.sin(self.item_angle) * self.rect.height) + self.rect.centery
+
+                current_name = self.all_games_data[index]["name"]
+                current_game = [g for g in self.games if g.name == current_name][0]
+                current_game.reset(data, index, x, y, self.rect, self.item_angle)
+                temp_games.append(current_game)
+
+            self.games = temp_games
 
     def sort_games(self, am):
         """0 - name, 1 - size, 2 - last_played"""
@@ -740,6 +814,9 @@ class GameWheelUi(UiElement):
         self.selected[1] = False
         if row == self.row and col == self.col:
             self.selected[1] = True
+
+    def check_game_menu_toggled(self, toggled):
+        self.game_menu_toggled = toggled
 
     def update(self, dt, col, row):
         # check if selected
@@ -821,14 +898,14 @@ class GameWheelUi(UiElement):
 
         sorted_games = sorted(self.games, key=lambda x: x.z_depth)
         for game in [s for s in sorted_games if s.z_depth < 2.0]:
-            game.draw(display)
+            game.draw(display, self.game_menu_toggled)
         for game in [s for s in sorted_games if s.z_depth >= 2.0]:
-            game.draw(display)
+            game.draw(display, self.game_menu_toggled)
 
         display.blit(self.curtain, self.curtain_rect)
 
         for game in [s for s in sorted_games if s == self.lowest_game]:
-            game.draw(display)
+            game.draw(display, self.game_menu_toggled)
 
         if False not in self.selected:
             self.game_label.draw(display)
@@ -928,7 +1005,7 @@ class ShugrPiOS:
         self.current_room = self.rm.current_room
 
         # installation setup
-        self.installation = False
+        self.installations = {}
 
         # master phase variable
         self.master_phase = -2
@@ -1008,11 +1085,16 @@ class ShugrPiOS:
                     # update curtain first
                     self.curtain.update(dt)
 
+                    # run main loop (delta time)
                     while time_accum >= 1 and step <= 50:
                         self.update(SPEED)
                         time_accum -= 1
                         step += 1
 
+                    # check on installations
+                    self.check_installations()
+
+                    # rest of main loop
                     self.events(self.master_phase)
                     self.draw()
 
@@ -1026,6 +1108,7 @@ class ShugrPiOS:
 
                         self.resume_menu()
 
+        # handle crashes and keyboard interrupts
         except (Exception, KeyboardInterrupt) as e:
             if isinstance(e, Exception):
                 error_msg = f"SHUGRPi has crashed due to the following error: {e}"
@@ -1082,6 +1165,8 @@ class ShugrPiOS:
                 room[2].update(dt)
 
             self.game_menu.update(dt)
+
+            self.game_wheel.check_game_menu_toggled(self.game_menu.toggled)
 
             self.notification.update(dt)
 
@@ -1335,10 +1420,27 @@ class ShugrPiOS:
 
         self.clock.tick(FPS)
 
+    """ installation utilities"""
     def install_game(self):
         current_game = self.game_wheel.lowest_game
-        self.installation = Installation(current_game, logger, self.internet_connection)
-        self.installation.start()
+        if current_game.name not in self.installations:
+            current_game.update_before_install()
+            self.installations[current_game.name] = Installation(current_game, logger, self.internet_connection)
+            self.installations[current_game.name].start()
+
+    def check_installations(self):
+        for installation in list(self.installations.values()).copy():
+            if installation.complete:
+                current_game = [g for g in self.game_wheel.games if g.name == installation.name][0]
+                current_game.update_after_install(installation.ready)
+                if installation.ready:
+                    self.notification.reset(f"Successfully installed `{current_game.name}`!")
+                else:
+                    self.notification.reset(f"Failed to install `{current_game.name}`!")
+                del self.installations[installation.name]
+            else:
+                current_game = [g for g in self.game_wheel.games if g.name == installation.name][0]
+                current_game.update_during_install(installation.step)
 
     """ various utilities """
     def get_image(self, img):
@@ -1422,9 +1524,9 @@ class ShugrPiOS:
             self.running_game.terminate()
 
         # cancel any ongoing game installations
-        if self.installation:
-            if not self.installation.complete:
-                self.installation._bailout()
+        for installation in self.installations.values():
+            if not installation.complete:
+                installation.bailout()
 
         # quit pygame
         self.running = False

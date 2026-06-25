@@ -3,6 +3,7 @@
 import subprocess
 import threading
 import shutil
+import time
 import sys
 import os
 
@@ -47,15 +48,17 @@ class Installation:
         self.venv = os.path.join(self.path, ".venv")
         self.requirements = game.requirements
 
+        self._remove_venv()
+
         self.python = None
         self.python_version = self.game.python_version or ""
 
         self.ready = False
         self.complete = False
+        self.step = 0
 
         # the conditions required to be True before installation
-        conditions = [not os.path.exists(self.venv),
-                      self.requirements is not None]
+        conditions = [not os.path.exists(self.venv)]
         if False not in conditions:
             self.ready = True
             self.logger.info(f"Attempting to install `{self.name}`...")
@@ -159,33 +162,42 @@ class Installation:
             self.ready = False
 
     def _handle_processes(self):
+        self.step = 1
         self.python = self._get_python(self.python_version)
+        time.sleep(1)
         if self.ready and not self.complete:
+            self.step = 2
             self._create_venv(self.python)
-        if self.ready and self.requirements and not self.complete:
+        time.sleep(1)
+        if self.ready and self.requirements is not None and not self.complete:
+            self.step = 3
             self._install_dependencies(self.python)
 
         if not self.complete:
-            if not self.ready:
-                self._bailout()
-            else:
+            if self.ready:
                 self.complete = True
                 self.logger.info(f"Successfully installed `{self.name}`")
+            else:
+                if self.step == 3:
+                    self._remove_venv()
+                self.bailout(True)
 
-    def _bailout(self):
+    def bailout(self, from_thread=False):
         self.logger.info(f"Aborting `{self.name}` installation...")
         self.complete = True
 
-        # kill dependencies process if existing
-        if len(self.processes) == 2:
-            if self.processes[-1].returncode is None:
-                self.processes[-1].terminate()
+        if not from_thread:
+            # kill dependencies process if existing
+            if len(self.processes) == 2:
+                if self.processes[-1].returncode is None:
+                    self.processes[-1].terminate()
 
-        # stop process handling
-        self.process_thread.join()
+            # stop process handling
+            self.process_thread.join()
 
-        # remove venv folder
-        self._remove_venv()
+            # remove venv folder
+            self._remove_venv()
+
         self.logger.error(f"Failed to install `{self.name}`")
 
     def _remove_venv(self):
