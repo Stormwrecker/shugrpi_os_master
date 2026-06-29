@@ -264,7 +264,7 @@ class GameMenu(pygame.sprite.Sprite):
         self.um = UiManager(self.ui_group)
 
     def _get_label(self, game):
-        display_name = game or ""
+        display_name = game.name or ""
         default_name = DEFAULT_GAME_CONFIG["name"]
         if len(display_name.split()) > 2:
             if display_name != default_name:
@@ -305,6 +305,7 @@ class GameMenu(pygame.sprite.Sprite):
             self.label = self._get_label(self.game)
             self.um.x_index = 0
             self.um.y_index = 0
+            self.um.get_ui(0, 0).available = not self.game.install_in_progress
         else:
             self.am.play_sound("menu_down")
         self.target_scroll[0] = self.x_scroll_bounds[self.toggled]
@@ -314,6 +315,8 @@ class GameMenu(pygame.sprite.Sprite):
         toggled = False
         if ui.row == 2:
             toggled = True
+        if ui.row == 0 and not self.game.installed:
+            ui.available = False
         return toggled
 
     def draw(self, display):
@@ -1239,7 +1242,7 @@ class ShugrPiOS:
                                 title = f"Sort By: {gw.sort_names[gw.sort_types[int(gw.sort_index)]]}\nAscending: {not gw.reverse_sort}"
                                 self.dialog_menu.reset(title, True)
                             if event.key == pygame.K_RETURN:
-                                self.game_menu.game = self.game_wheel.games[self.game_wheel.master_index].name
+                                self.game_menu.game = self.game_wheel.games[self.game_wheel.master_index]
                                 self.game_wheel.selected[0] = False
                                 self.game_menu.toggle()
 

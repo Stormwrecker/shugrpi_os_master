@@ -368,6 +368,14 @@ class UiElement(pygame.sprite.Sprite):
             self.original_pos = self.rect.center
 
         self.selected = False
+        self.available = True
+
+        if self.rect is not None:
+            self.gray_rect = self.rect.copy()
+            self.gray_rect.inflate_ip(-8, -8)
+            self.gray_surf = pygame.Surface(self.gray_rect.size).convert()
+            self.gray_surf.set_colorkey(BLACK)
+            self.gray_surf.fill((175, 175, 175))
 
         self.func = func
 
@@ -401,6 +409,7 @@ class UiElement(pygame.sprite.Sprite):
         self.check_selected(col, row)
         if self.label_type == 0:
             self.text.rect.center = self.rect.center
+            self.gray_rect.center = self.rect.center
 
     def check_selected(self, col, row):
         self.selected = False
@@ -409,7 +418,8 @@ class UiElement(pygame.sprite.Sprite):
 
     def action(self):
         if self.func is not None:
-            self.func()
+            if self.available:
+                self.func()
 
     def draw(self, display):
         if self.selected:
@@ -419,6 +429,9 @@ class UiElement(pygame.sprite.Sprite):
             self.text.draw(display)
         elif self.label_type == 1:
             display.blit(self.image, self.rect)
+
+        if not self.available:
+            display.blit(self.gray_surf, self.gray_rect, special_flags=pygame.BLEND_RGB_MIN)
 
 
 # UI Manager
@@ -479,10 +492,12 @@ class UiManager:
         self.x_index = 0
         self.y_index = 0
 
+    def get_ui(self, x, y):
+        return self.master_ui_dict[y][x]
+
     def action(self):
-        # if self.active:
         self.master_ui_dict[self.y_index][self.x_index].action()
-        return self.master_ui_dict[self.y_index][self.x_index]
+        return self.get_ui(self.x_index, self.y_index)
 
     def draw(self, display):
         for ui in self.master_ui_list:
