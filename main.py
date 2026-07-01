@@ -107,12 +107,11 @@ class Curtain(pygame.sprite.Sprite):
         pygame.sprite.Sprite.__init__(self)
         self.color = BLACK
 
-        self.image = pygame.Surface((1, 1), pygame.SRCALPHA)
-        self.image = pygame.transform.scale(self.image, (DISPLAY_WIDTH, DISPLAY_HEIGHT)).convert()
+        self.image = pygame.Surface((1, 1)).convert_alpha()
+        self.image = pygame.transform.scale(self.image, (DISPLAY_WIDTH, DISPLAY_HEIGHT))
         self.rect = self.image.get_rect()
         self.rect.topleft = (0, 0)
 
-        self.image.set_colorkey(WHITE)
         self.image.fill(self.color)
 
         self.alpha = 255
@@ -132,6 +131,7 @@ class Curtain(pygame.sprite.Sprite):
         else:
             if self.alpha == 255:
                 self.flip = True
+        self.image.set_alpha(self.alpha)
 
     def set_color(self, new_color):
         if self.color != new_color:
@@ -139,7 +139,6 @@ class Curtain(pygame.sprite.Sprite):
             self.color = new_color
 
     def draw(self, display):
-        self.image.set_alpha(self.alpha)
         if self.alpha:
             display.blit(self.image, self.rect)
 
@@ -148,7 +147,7 @@ class Curtain(pygame.sprite.Sprite):
 class FloatingLogo(pygame.sprite.Sprite):
     def __init__(self):
         pygame.sprite.Sprite.__init__(self)
-        self.original_image = pygame.transform.scale(master_images["logo"], (int(165 * 4), int(165 * 4)))
+        self.original_image = pygame.transform.scale(master_images["logo"], (int(165 * 4), int(165 * 4))).convert_alpha()
         self.start_timer = Timer(120)
         self.timer = Timer(240)
         self.wait_timer = Timer(random.randint(180, 240))
@@ -200,12 +199,13 @@ class FloatingLogo(pygame.sprite.Sprite):
                     if self.wait_timer.update(dt):
                         self.reset()
 
+        self.image.set_alpha(self.alpha)
+
         self.floating_x += self.dx * dt
         self.floating_y += self.dy * dt
         self.rect.topleft = (self.floating_x, self.floating_y)
 
     def draw(self, display):
-        self.image.set_alpha(self.alpha)
         if self.alpha:
             display.blit(self.image, self.rect)
 
@@ -262,6 +262,8 @@ class GameMenu(pygame.sprite.Sprite):
                       index, 0, size=14, group=self.ui_group, func=action)
 
         self.um = UiManager(self.ui_group)
+        self.start_game_ui = self.um.get_ui(0, 0)
+        self.status = None
 
     def _get_label(self, game):
         display_name = game.name or ""
@@ -294,6 +296,7 @@ class GameMenu(pygame.sprite.Sprite):
 
         for index, ui in enumerate(self.um.ui_group):
             ui.rect.x = self.page_rect.x + 120 - (index * 30)
+
         self.um.update(dt)
 
         self.label.rect.topleft = (self.main_rect.x + 35, self.main_rect.top + 30)
@@ -305,19 +308,54 @@ class GameMenu(pygame.sprite.Sprite):
             self.label = self._get_label(self.game)
             self.um.x_index = 0
             self.um.y_index = 0
-            self.um.get_ui(0, 0).available = not self.game.install_in_progress
+
+            status = self._get_status()
+            self.update_start_game_ui(status)
+
         else:
             self.am.play_sound("menu_down")
         self.target_scroll[0] = self.x_scroll_bounds[self.toggled]
 
+    def _get_status(self):
+        status = None
+        if self.game.installed:
+            status = 0
+        elif not self.game.installed and not self.game.install_in_progress:
+            status = 1
+        elif not self.game.installed and self.game.install_in_progress:
+            status = 2
+        return status
+
+    def update_start_game_ui(self, status):
+        if self.status != status:
+            # already playable
+            if status == 0:
+                self.start_game_ui.available = True
+                self.start_game_ui.change_label("Start Game", default_font)
+                self.start_game_ui.rect.x = self.page_rect.x + 120
+                self.um.update(1)
+
+            # not installed, but not installing either
+            elif status == 1:
+                self.start_game_ui.available = True
+                self.start_game_ui.change_label("Install Game", default_font)
+                self.start_game_ui.rect.x = self.page_rect.x + 120
+                self.um.update(1)
+
+            # not installed, but already installing
+            elif status == 2:
+                self.start_game_ui.available = False
+                self.um.update(1)
+
+            self.status = status
+
     def action(self):
-        ui = self.um.action()
-        toggled = False
-        if ui.row == 2:
-            toggled = True
-        if ui.row == 0 and not self.game.installed:
-            ui.available = False
-        return toggled
+        if self.um.active:
+            ui = self.um.action()
+            toggled = False
+            if ui.row == 2:
+                toggled = True
+            return toggled
 
     def draw(self, display):
         display.blit(self.image, self.main_rect)
@@ -695,12 +733,11 @@ class GameWheelUi(UiElement):
 
         self.selected = [True, True]
 
-        self.curtain = pygame.Surface((1, 1), pygame.SRCALPHA)
-        self.curtain = pygame.transform.scale(self.curtain, (DISPLAY_WIDTH, DISPLAY_HEIGHT - 60)).convert()
+        self.curtain = pygame.Surface((1, 1)).convert_alpha()
+        self.curtain = pygame.transform.scale(self.curtain, (DISPLAY_WIDTH, DISPLAY_HEIGHT - 60))
         self.curtain_rect = self.curtain.get_rect()
         self.curtain_rect.topleft = (0, 30)
 
-        self.curtain.set_colorkey(WHITE)
         self.curtain.fill(DARKER_GRAY)
 
         self.curtain_alpha = 0
@@ -1160,9 +1197,11 @@ class ShugrPiOS:
 
             if (self.dialog_menu.showing and self.dialog_menu.has_ui) or self.virtual_keyboard.toggled:
                 self.rm.current_room[2].active = False
+                self.game_menu.um.active = False
                 self.game_wheel.selected[1] = False
             else:
                 self.rm.current_room[2].active = True
+                self.game_menu.um.active = True
 
             for _, room in self.rooms.items():
                 room[2].update(dt)
@@ -1216,6 +1255,7 @@ class ShugrPiOS:
                             self.dialog_menu.um.change_col(1)
                         if event.key == pygame.K_RETURN:
                             self.dialog_menu.um.action()
+                            self.handle_dialog_output()
 
                     # dialog menu cancel
                     if not self.dialog_menu.has_ui:
@@ -1370,7 +1410,7 @@ class ShugrPiOS:
             self.start_game = True
             self.am.stop_music()
         else:
-            self.install_game()
+            self.dialog_menu.reset("Install?", has_ui=True, options=["Yes", "No"], dialog_type=0)
 
     def execute_game(self):
         proc, path, env = self.game_wheel.prepare_game()
@@ -1430,6 +1470,7 @@ class ShugrPiOS:
             current_game.update_before_install()
             self.installations[current_game.name] = Installation(current_game, logger, self.internet_connection)
             self.installations[current_game.name].start()
+            self.game_menu.update_start_game_ui(2)
 
     def check_installations(self):
         for installation in list(self.installations.values()).copy():
@@ -1437,9 +1478,11 @@ class ShugrPiOS:
                 current_game = [g for g in self.game_wheel.games if g.name == installation.name][0]
                 current_game.update_after_install(installation.ready)
                 if installation.ready:
-                    self.notification.reset(f"Successfully installed `{current_game.name}`!")
+                    self.dialog_menu.reset(f"Successfully installed {current_game.name}!", instant=False, has_ui=True, options=["OK"])
+                    self.game_menu.update_start_game_ui(0)
                 else:
-                    self.notification.reset(f"Failed to install `{current_game.name}`!")
+                    self.dialog_menu.reset(f"Failed to install {current_game.name}!", instant=False, has_ui=True, options=["OK"])
+                    self.game_menu.update_start_game_ui(1)
                 del self.installations[installation.name]
             else:
                 current_game = [g for g in self.game_wheel.games if g.name == installation.name][0]
@@ -1479,6 +1522,13 @@ class ShugrPiOS:
             self.current_room[2].action()
         if event.key == pygame.K_BACKSPACE:
             self.switch_room("games")
+
+    def handle_dialog_output(self):
+        if self.dialog_menu.dialog_type == 0:
+            if self.dialog_menu.choice == 1:
+                self.install_game()
+            elif self.dialog_menu.choice == 0:
+                self.game_menu.update_start_game_ui(1)
 
     """time utilities"""
     def set_time(self):

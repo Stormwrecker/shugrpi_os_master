@@ -389,14 +389,20 @@ class UiElement(pygame.sprite.Sprite):
         elif label is None:
             return None
 
-    def change_label(self, new_label):
+    def change_label(self, new_label, font=retro_font):
         if new_label != self.label:
             self.label_type = self._get_label_type(new_label)
             if self.label_type == 0:
                 self.pre_rect = pygame.Rect((self.x, self.y, 10, 10))
-                self.text = Text(new_label, self.pre_rect.centerx, self.pre_rect.centery, WHITE, self.size, font=retro_font, centered=True)
+                self.text = Text(new_label, self.pre_rect.centerx, self.pre_rect.centery, WHITE, self.size, font=font, centered=True)
                 r = self.text.rect
                 self.rect = pygame.Rect((r.x - self.size//2, r.y - self.size//2, r.width + self.size, r.height + self.size))
+
+                self.gray_rect = self.rect.copy()
+                self.gray_rect.inflate_ip(-8, -8)
+                self.gray_surf = pygame.Surface(self.gray_rect.size).convert()
+                self.gray_surf.set_colorkey(BLACK)
+                self.gray_surf.fill((175, 175, 175))
 
             elif self.label_type == 1:
                 self.image = new_label
@@ -550,18 +556,21 @@ class DialogMenu:
         self.surf.set_colorkey(BLACK)
         self.rect = self.surf.get_rect()
 
-        self.shadow_surf = pygame.Surface((self.width, self.height)).convert_alpha()
+        self.shadow_surf = pygame.Surface((self.width, self.height)).convert()
         self.shadow_surf.set_colorkey(BLACK)
         self.shadow_surf.fill(BLACK)
         for i in range(125):
             pygame.draw.line(self.shadow_surf, ([max(90 - i//2, 40) for _ in range(3)]), (0, i*2), (self.width, i*2), 2)
 
-        self.curtain = pygame.Surface((1, 1), pygame.SRCALPHA)
-        self.curtain = pygame.transform.scale(self.curtain, (screen.get_width(), screen.get_height() - 60)).convert()
+        self.ui_surf = pygame.Surface((self.width, self.height)).convert_alpha()
+        self.ui_surf.fill(GRAY)
+        self.ui_surf.set_colorkey(BLACK)
+
+        self.curtain = pygame.Surface((1, 1)).convert_alpha()
+        self.curtain = pygame.transform.scale(self.curtain, (screen.get_width(), screen.get_height() - 60))
         self.curtain_rect = self.curtain.get_rect()
         self.curtain_rect.topleft = (0, 30)
 
-        self.curtain.set_colorkey(WHITE)
         self.curtain.fill(DARKER_GRAY)
 
         self.curtain_alpha = 0
@@ -570,8 +579,9 @@ class DialogMenu:
 
         self.reset(msg, instant, has_ui, options)
 
-    def reset(self, msg, instant=False, has_ui=False, options=["OK"]):
+    def reset(self, msg, instant=False, has_ui=False, options=["OK"], dialog_type=None):
         self.msg = msg
+        self.dialog_type = dialog_type
 
         if instant:
             self.alpha = max(200, self.alpha)
@@ -597,9 +607,16 @@ class DialogMenu:
         self.um = False
         if self.has_ui:
             self.ui_group = pygame.sprite.Group()
-            if "OK" in options:
-                ok_btn = UiElement("OK", self.rect.width // 2, self.rect.height - 50, 0, 0, 20, font=retro_font, group=self.ui_group,
-                                   func=self.fade_out)
+            for opt in options:
+                if opt in ["No", "Cancel"]:
+                    ok_btn = UiElement(opt, self.rect.width // 2 + 50, self.rect.height - 50, 0, 0, 20, font=retro_font, group=self.ui_group,
+                                       func=self.fade_out)
+                elif opt == "OK":
+                    ok_btn = UiElement(opt, self.rect.width // 2, self.rect.height - 50, 0, 0, 20, font=retro_font, group=self.ui_group,
+                                       func=self.fade_out)
+                elif opt in ["Yes", "Install"]:
+                    ok_btn = UiElement(opt, self.rect.width // 2 - 50, self.rect.height - 50, 0, 1, 20, font=retro_font, group=self.ui_group,
+                                       func=self.fade_out)
             self.um = UiManager(self.ui_group)
 
         if self.msg is not None:
@@ -608,11 +625,14 @@ class DialogMenu:
                 text = Text(msg, self.rect.width // 2, self.rect.height // 2 - 30 + (30 * i), WHITE, 15, font=retro_font, centered=True)
                 text.draw(self.surf)
 
+        self.choice = None
+
         self.surf.set_alpha(self.alpha)
         self.curtain.set_alpha(self.curtain_alpha)
 
     def update(self, dt):
         self.surf.set_alpha(self.alpha)
+        self.ui_surf.set_alpha(self.alpha)
         self.curtain.set_alpha(self.curtain_alpha)
 
         if self.has_ui:
@@ -634,13 +654,16 @@ class DialogMenu:
 
     def fade_out(self):
         self.showing = False
+        self.choice = self.um.x_index
 
     def draw(self, display):
         if self.alpha:
             display.blit(self.curtain, self.curtain_rect)
             if self.has_ui:
-                self.um.draw(self.surf)
+                self.ui_surf.fill(BLACK)
+                self.um.draw(self.ui_surf)
             display.blit(self.surf, self.rect)
+            display.blit(self.ui_surf, self.rect)
 
 
 # text field
