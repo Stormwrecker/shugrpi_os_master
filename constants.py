@@ -54,3 +54,6 @@ Game configurations (DEFAULT_GAME_CONFIG)
 DEFAULT_GAME_CONFIG = {"name": "Unknown Game",
                        "thumbnail": None,
                        "executable": None}
+
+WELCOME_MSG = "Welcome to the SHUGRPi!"
+INSTALLATION_MSG = " must be fully installed before playing. Continue?\n^(this requires an internet connection)"

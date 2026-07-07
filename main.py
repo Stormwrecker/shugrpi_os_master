@@ -48,7 +48,6 @@ import random
 
 # initialize pygame with necessary setups
 def init_pygame():
-    os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
     pygame.init()
     logger.info("Initialized pygame-ce")
     active_driver = None
@@ -1027,7 +1026,7 @@ class ShugrPiOS:
         self.banner_bottom_rect = self.banner_bottom.get_rect()
         self.banner_bottom_rect.midbottom = (half_display_x, DISPLAY_HEIGHT)
 
-        self.dialog_menu = DialogMenu(self.screen, "Welcome to the SHUGRPi!", has_ui=True)
+        self.dialog_menu = DialogMenu(self.screen, WELCOME_MSG, has_ui=True)
         self.notification = Notification(None)
 
         # effects setup
@@ -1382,11 +1381,11 @@ class ShugrPiOS:
 
             self.rm.draw(self.display)
 
-            self.dialog_menu.draw(self.display)
-
             self.notification.draw(self.display)
 
             self.virtual_keyboard.draw(self.display)
+
+            self.dialog_menu.draw(self.display)
 
             draw_text(self.display, str(round(self.clock.get_fps())), 30, 50, WHITE, 10, retro_font)
 
@@ -1410,7 +1409,7 @@ class ShugrPiOS:
             self.start_game = True
             self.am.stop_music()
         else:
-            self.dialog_menu.reset("Install?", has_ui=True, options=["Yes", "No"], dialog_type=0)
+            self.dialog_menu.reset(current_game.name + INSTALLATION_MSG, has_ui=True, options=["Yes", "No"], dialog_type=0)
 
     def execute_game(self):
         proc, path, env = self.game_wheel.prepare_game()
@@ -1423,7 +1422,8 @@ class ShugrPiOS:
             self.start_game = False
             self.pause = True
         except Exception as e:
-            logger.error(f"Failed to launch {self.running_game[0]}")
+            logger.error(f"Failed to launch {self.running_game[0]}: {e}")
+            self.notification.reset(f"Failed to launch: {e}")
             self.resume_menu()
 
     def handle_game_output(self):
@@ -1480,9 +1480,11 @@ class ShugrPiOS:
                 if installation.ready:
                     self.dialog_menu.reset(f"Successfully installed {current_game.name}!", instant=False, has_ui=True, options=["OK"])
                     self.game_menu.update_start_game_ui(0)
+                    self.virtual_keyboard.toggled = False
                 else:
                     self.dialog_menu.reset(f"Failed to install {current_game.name}!", instant=False, has_ui=True, options=["OK"])
                     self.game_menu.update_start_game_ui(1)
+                    self.virtual_keyboard.toggled = False
                 del self.installations[installation.name]
             else:
                 current_game = [g for g in self.game_wheel.games if g.name == installation.name][0]
@@ -1558,6 +1560,8 @@ class ShugrPiOS:
         self.current_room = self.rm.switch_to(name)
         if name == "games":
             self.current_room[2].y_index = 1
+        for field in self.text_fields.values():
+            field.clear()
 
     """ threaded utilities """
     def update_internet_connection(self):

@@ -519,13 +519,14 @@ class Notification:
         self.surf.set_alpha(self.alpha)
         if self.display_timer.update(dt):
             self.alpha = max(0, self.alpha - 5 * dt)
+
         self.text.update()
 
     def reset(self, msg=None):
         self.msg = str(msg)
         self.size = 9
         self.x = DISPLAY_WIDTH - 20
-        self.y = 40
+        self.y = 37
 
         self.text = Text(self.msg, 0, 0, WHITE, self.size, font=retro_font)
 
@@ -595,6 +596,7 @@ class DialogMenu:
 
         self.showing = False
         self.text = None
+        self.max_chars = 30
 
         self.show_timer = Timer(120)
 
@@ -604,7 +606,7 @@ class DialogMenu:
 
         self.has_ui = has_ui
 
-        self.um = False
+        self.um = None
         if self.has_ui:
             self.ui_group = pygame.sprite.Group()
             for opt in options:
@@ -619,10 +621,66 @@ class DialogMenu:
                                        func=self.fade_out)
             self.um = UiManager(self.ui_group)
 
+        self.small_msg = []
         if self.msg is not None:
             self.showing = True
-            for i, msg in enumerate(self.msg.splitlines()):
-                text = Text(msg, self.rect.width // 2, self.rect.height // 2 - 30 + (30 * i), WHITE, 15, font=retro_font, centered=True)
+
+            letter_count = 0
+            line_count = 0
+            is_small = False
+            msg_list = [i for i in self.msg]
+
+            for i, v in enumerate(self.msg[:]):
+                letter_count += 1
+
+                # check for line break
+                if v == "\n":
+                    letter_count = 0
+                    line_count += 1
+
+                # check for small characters
+                if v == "^":
+                    is_small = not is_small
+
+                # insert line breaks if line exceeds max_chars
+                if letter_count >= self.max_chars:
+                    if msg_list[i] == " ":
+                        msg_list[i] = "\n"
+                        letter_count = 0
+                        line_count += 1
+
+                    self.msg = "".join(msg_list)
+
+                # add small characters to a separate list
+                if is_small:
+                    if v != "^":
+                        self.small_msg.append(v)
+
+            temp_msg = [i for i in self.msg]
+            temp_msg.reverse()
+            for i, v in enumerate(self.small_msg):
+                if v in temp_msg:
+                    temp_msg.remove(v)
+            temp_msg.reverse()
+
+            for i in range(line_count):
+                self.small_msg.insert(0, "\n")
+
+            self.msg = "".join([i if i != "^" else " " for i in temp_msg])
+
+            # convert all small characters from a list to a string
+            self.small_msg = "".join(self.small_msg[:])
+
+            msg_lines = self.msg.splitlines()
+            normal_size = 15
+            for i, msg in enumerate(msg_lines):
+                text = Text(msg, self.rect.width // 2, (self.rect.height // 3 + 10) - 15 * (len(msg_lines)) // 2 + (normal_size * 2 * i), WHITE, normal_size, font=retro_font, centered=True)
+                text.draw(self.surf)
+
+            small_msg_lines = self.small_msg.splitlines()
+            small_size = 10
+            for i, msg in enumerate(small_msg_lines):
+                text = Text(msg, self.rect.width // 2, (self.rect.height // 3 + 10) - 15 * (len(msg_lines)) // 2 + (normal_size * 2 * i), WHITE, small_size, font=retro_font, centered=True)
                 text.draw(self.surf)
 
         self.choice = None
@@ -654,7 +712,8 @@ class DialogMenu:
 
     def fade_out(self):
         self.showing = False
-        self.choice = self.um.x_index
+        if self.um is not None:
+            self.choice = self.um.x_index
 
     def draw(self, display):
         if self.alpha:
@@ -663,7 +722,8 @@ class DialogMenu:
                 self.ui_surf.fill(BLACK)
                 self.um.draw(self.ui_surf)
             display.blit(self.surf, self.rect)
-            display.blit(self.ui_surf, self.rect)
+            if self.has_ui:
+                display.blit(self.ui_surf, self.rect)
 
 
 # text field
@@ -723,9 +783,13 @@ class TextField(pygame.sprite.Sprite):
 
         self.value = self.text_input
 
+    def clear(self):
+        self.text.set_text("")
+        self.text_input = ""
+
     def draw(self, display):
         self.image.fill(GRAY)
-        if len(self.text_input) or self.true_selected:
+        if len(self.text_input):
             self.text.draw(self.image)
         else:
             self.default_text.draw(self.image)

@@ -63,8 +63,9 @@ class Installation:
             self.ready = True
             self.logger.info(f"Attempting to install `{self.name}`...")
 
-        if not os.path.exists(self.requirements):
-            self.logger.warning(f"Unable to detect requirements for `{self.name}`...")
+        if self.requirements:
+            if not os.path.exists(self.requirements):
+                self.logger.warning(f"Unable to detect requirements for `{self.name}`...")
 
         self.processes = []
         self.process_thread = threading.Thread(name=f"`{self.name}` Installation", target=self._handle_processes, daemon=True)
