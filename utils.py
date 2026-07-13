@@ -26,10 +26,10 @@ def init_logger():
     logging.basicConfig(
         level=logging.INFO,
         format="%(levelname)s - %(message)s",
-        handlers=[logging.StreamHandler()]
+        handlers=[logging.FileHandler(os.path.join(temp_dir, "temp_session.log"), "w"),
+                  logging.StreamHandler()]
     )
     logger = logging.getLogger("SHUGRPi System Log")
-    logger.addHandler(logging.FileHandler(os.path.join(temp_dir, "temp_session.log"), "w"))
 
     return logger
 
@@ -141,10 +141,19 @@ class NetworkManager:
         self.psk_key = None
         self.status = 0
         self.signal_strength = 0
+        self.connected = None
+        self.internet_access = None
+        self.ip = gethostbyname(gethostname())
         self.linux = linux
 
     def connect_to_wifi(self, ssid, psk_key):
         self.linux.connect_to_wifi(ssid.value, psk_key.value)
+
+    def check_wifi_connection(self):
+        return self.ip not in ["127.0.0.1", "localhost"]
+
+    def check_internet_access(self):
+        self.linux.ping()
 
 
 """ Image Utilities """

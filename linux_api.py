@@ -56,6 +56,13 @@ class Linux:
             self._notify(f"Failed to connect to `{ssid}`")
             return 1
 
+    def ping(self):
+        code = self._call(["ping", "2", "-c", "8.8.8.8"])
+        if code == 0:
+            self.logger.info("SHUGRPi has access to the internet")
+        else:
+            self.logger.warning("SHUGRPi does not have access to the internet")
+
     """git commands"""
     def git_clone(self, repo="https://github.com/Stormwrecker/shugrpi_os_master.git"):
         return self._call(["git", "clone", repo])

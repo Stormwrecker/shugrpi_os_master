@@ -46,6 +46,7 @@ import time
 import json
 import math
 import random
+import shutil
 
 
 # initialize pygame with necessary setups
@@ -1189,7 +1190,8 @@ class ShugrPiOS:
                 pygame.display.message_box(window_title, error_msg, "error")
                 raise
                 self.pre_shutdown(1)
-            self.pre_shutdown(-1)
+            self.pre_shutdown(1)
+            self.shutdown(-1)
 
     """ main loop """
     def update(self, dt):
@@ -1570,10 +1572,7 @@ class ShugrPiOS:
     def _dump_log(self):
         temp_log_file = os.path.join(base_path, "logs", "temp_session.log")
         new_log_file = os.path.join(base_path, "logs", "session.log")
-        with open(temp_log_file, "r") as f:
-            full_log = f.read()
-        with open(new_log_file, "w") as f:
-            f.write(full_log)
+        shutil.copy(temp_log_file, new_log_file)
         quit_logger()
         os.remove(temp_log_file)
 
