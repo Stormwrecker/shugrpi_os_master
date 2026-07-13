@@ -16,14 +16,26 @@ default_font = os.path.join(base_path, "fonts", "Kenney_Bold.ttf")
 retro_font = os.path.join(base_path, "fonts", "PressStart2P.ttf")
 font_cache = {}
 
-# set up logger
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(levelname)s - %(message)s",
-    handlers=[logging.FileHandler(os.path.join(base_path, "session.log"), "w"),
-              logging.StreamHandler()]
-)
-logger = logging.getLogger("SHUGRPi")
+temp_dir = os.path.join(base_path, "logs")
+
+def init_logger():
+    if not os.path.exists(temp_dir):
+        os.mkdir(temp_dir)
+
+    # set up logger
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(levelname)s - %(message)s",
+        handlers=[logging.StreamHandler()]
+    )
+    logger = logging.getLogger("SHUGRPi System Log")
+    logger.addHandler(logging.FileHandler(os.path.join(temp_dir, "temp_session.log"), "w"))
+
+    return logger
+
+def quit_logger():
+    logging.shutdown()
+
 
 """ Device Managers """
 
@@ -795,7 +807,9 @@ class TextField(pygame.sprite.Sprite):
             self.default_text.draw(self.image)
         display.blit(self.image, self.actual_rect)
         pygame.draw.rect(display, GRAY, self.actual_rect, 4)
-        if self.true_selected:
+        if self.true_selected and not self.selected:
+            pygame.draw.rect(display, (120, 120, 120), self.actual_rect, 4, border_radius=3)
+        elif self.true_selected and self.selected:
             pygame.draw.rect(display, WHITE, self.actual_rect, 4, border_radius=3)
 
 
@@ -903,7 +917,9 @@ class SystemClock:
         self.round_clock = not self.round_clock
 
 
-__all__ = ["CompatibilityManager",
+__all__ = ["init_logger",
+           "quit_logger",
+           "CompatibilityManager",
            "AudioManager",
            "NetworkManager",
            "load_image",
@@ -913,7 +929,6 @@ __all__ = ["CompatibilityManager",
            "Text",
            "get_game_info",
            "ease_out_to",
-           "logger",
            "load_thumbnail",
            "preload_images",
            "Timer",

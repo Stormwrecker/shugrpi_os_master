@@ -8,31 +8,52 @@ class Linux:
         self.is_shugrpi = is_shugrpi
         self.logger = logger
 
+    def set_notification(self, notification):
+        self.notification = notification
+
     """set time"""
     def set_time(self, time):
-        code = self._call(["sudo", "timedatectl", "set-time", time])
+        code, error = self._run(["sudo", "timedatectl", "set-time", time])
         if code == 0:
-            self.logger.info(f"Set time to `{time}`")
+            self.logger.info(f"Set time to {time}")
+            self._notify(f"Set time to {time}")
         elif code > 0:
-            self.logger.error("Failed to set the time")
+            self.logger.error(f"Failed to set the time: {error}")
+            self._notify(f"Failed to set the time: {error}")
         elif code == -1:
             self.logger.warning("Cannot set time on non-SHUGRPi device")
+            self._notify("Cannot set time on non-SHUGRPi device")
         return code
 
     """network commands"""
     def connect_to_wifi(self, ssid, psk_key):
-        self.logger.info(f"Attempting a connection to '{ssid}'...")
+        if not len(ssid):
+            self._notify(f"`SSID` field cannot be empty")
+            return -1
+
+        if not len(psk_key):
+            self._notify(f"`Password` field cannot be empty")
+            return -1
+
+        self.logger.info(f"Attempting a connection to `{ssid}`...")
+        if not self.is_shugrpi:
+            self.logger.info(f"Non-SHUGRPi device cannot connect to `{ssid}`")
+            self._notify(f"Non-SHUGRPi device cannot connect to `{ssid}`")
+            return -1
+
         con_name = "shugrpi-wifi"
-        make_profile_proc = self._run(["nmcli", "con", "add", "type", "wifi", "ifname"
+        make_profile_proc, _ = self._run(["nmcli", "con", "add", "type", "wifi", "ifname"
                                        "con-name", con_name, "ssid", ssid])
-        set_security_proc = self._run(["nmcli", "con", "mod", con_name, "wifi-sec.key-mgmt", "wpa-psk"])
-        set_psk_proc = self._run(["nmcli", "con", "mod", con_name, "wifi-sec.key-psk", psk_key])
+        set_security_proc, _ = self._run(["nmcli", "con", "mod", con_name, "wifi-sec.key-mgmt", "wpa-psk"])
+        set_psk_proc, _ = self._run(["nmcli", "con", "mod", con_name, "wifi-sec.key-psk", psk_key])
         all_procs = [make_profile_proc, set_security_proc, set_psk_proc]
         if 1 not in all_procs and -1 not in all_procs:
-            self.logger.info(f"Connected successfully to '{ssid}' using the password '{len(psk_key) * '*'}'")
+            self.logger.info(f"Connected successfully to `{ssid}` using the password '{len(psk_key) * '*'}'")
+            self._notify(f"Connected successfully to `{ssid}`")
             return 0
         else:
-            self.logger.error(f"Failed to connect to '{ssid}' using the password '{len(psk_key) * '*'}'")
+            self.logger.error(f"Failed to connect to `{ssid}` using the password '{len(psk_key) * '*'}'")
+            self._notify(f"Failed to connect to `{ssid}`")
             return 1
 
     """git commands"""
@@ -72,11 +93,11 @@ class Linux:
 
     """power commands"""
     def power_off(self):
-        self.logger.info("Powering off device...")
         self._run(["sudo", "poweroff"])
 
     def reboot(self):
-        self.logger.info("Rebooting OS...")
+        if self.is_shugrpi:
+            self.logger.info("Rebooting OS...")
         self._run(["pkill", "Xorg"])
 
     """runners"""
@@ -87,8 +108,13 @@ class Linux:
 
     def _run(self, proc):
         if self.is_shugrpi:
-            return subprocess.run(proc, check=True, capture_output=True, text=True)
-        return -1
+            done_proc = subprocess.run(proc, check=True, capture_output=True, text=True)
+            return done_proc.returncode, done_proc.stderr
+        return -1, None
+
+    """notify"""
+    def _notify(self, msg):
+        self.notification.reset(msg)
 
 
 CATALOG_PATH = "/opt/catalog-repo"

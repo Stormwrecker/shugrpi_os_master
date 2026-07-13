@@ -16,6 +16,7 @@ import os
 import sys
 
 # startup meesage
+logger = init_logger()
 logger.info(f"SHUGRPi Operating System v{VERSION}")
 
 # initialize Compatibilty Manager
@@ -45,6 +46,7 @@ import time
 import json
 import math
 import random
+
 
 # initialize pygame with necessary setups
 def init_pygame():
@@ -116,21 +118,30 @@ class Curtain(pygame.sprite.Sprite):
         self.alpha = 255
         self.image.set_alpha(self.alpha)
 
+        self.speed = 20
+
         self.flip = False
         self.target_alpha = 255
 
     def update(self, dt):
         if self.alpha != self.target_alpha:
             if self.alpha > self.target_alpha:
-                self.alpha = max(int(self.alpha - (20 * dt)), self.target_alpha)
+                self.alpha = max(int(self.alpha - (self.speed * dt)), self.target_alpha)
                 self.flip = False
             elif self.alpha < self.target_alpha:
-                self.alpha = min(int(self.alpha + (20 * dt)), self.target_alpha)
+                self.alpha = min(int(self.alpha + (self.speed * dt)), self.target_alpha)
                 self.flip = False
         else:
             if self.alpha == 255:
                 self.flip = True
         self.image.set_alpha(self.alpha)
+
+    def fade_to(self, alpha=0, speed=20, color=None):
+        self.target_alpha = alpha
+        self.speed = speed
+        if color is None:
+            color = self.color
+        self.set_color(color)
 
     def set_color(self, new_color):
         if self.color != new_color:
@@ -1028,6 +1039,7 @@ class ShugrPiOS:
 
         self.dialog_menu = DialogMenu(self.screen, WELCOME_MSG, has_ui=True)
         self.notification = Notification(None)
+        self.linux.set_notification(self.notification)
 
         # effects setup
         self.curtain = Curtain()
@@ -1053,6 +1065,14 @@ class ShugrPiOS:
         self.running = True
         self.running_game = [None, None]
         self.start_game = False
+
+        # shutdown variables
+        self.return_code = None
+        self.system_shutdown = None
+
+        self.timers["shutdown"] = Timer(240)
+        self.timers["shutdown"].stop()
+        self.will_shutdown = False
 
         logger.info("Initialized SHUGRPi Operating System")
 
@@ -1095,7 +1115,7 @@ class ShugrPiOS:
 
     def setup_power_room(self):
         ui_group = pygame.sprite.Group()
-        self.power_ui = UiElement("Power Off", 100, 100, 0, 0, size=10, font=retro_font, group=ui_group, func=self.linux.power_off)
+        self.power_ui = UiElement("Power Off", 100, 100, 0, 0, size=10, font=retro_font, group=ui_group, func=lambda: self.pre_shutdown(0, True))
         self.reboot_ui = UiElement("Reboot", 100, 200, 1, 0, size=10, font=retro_font, group=ui_group, func=self.linux.reboot)
         back_btn = self.add_back_button(ui_group)
 
@@ -1113,11 +1133,13 @@ class ShugrPiOS:
         step = 0
         try:
             while self.running:
+                # tick clock
+                dt = self.clock.tick(FPS) / 1000.0 * 60
+
                 self.current_time = time.strftime("%H:%M") if self.sys_clock.round_clock else time.strftime("%I:%M")
 
+                # if OS is not paused
                 if not self.pause:
-                    # tick clock
-                    dt = self.clock.tick(FPS) / 1000.0 * 60
                     time_accum += dt
                     step = 0
 
@@ -1137,7 +1159,7 @@ class ShugrPiOS:
                     self.events(self.master_phase)
                     self.draw()
 
-                # while game is running
+                # while a game is running
                 if self.running_game[1] is not None:
                     # keep app minimally responsive to avoid breakage
                     pygame.event.get()
@@ -1147,6 +1169,18 @@ class ShugrPiOS:
 
                         self.resume_menu()
 
+                # handle shutdown
+                if self.will_shutdown:
+                    if not self.timers["shutdown"].update(dt):
+                        current_second = int(self.timers['shutdown'].duration - self.timers['shutdown'].time) // 60
+                        self.notification.reset(f"Shutting down in {current_second}...")
+                    else:
+                        self.notification.alpha = max(0, self.notification.alpha - 5 * dt)
+                        self.curtain.fade_to(255, 4, BLACK)
+                        if self.curtain.flip:
+                            time.sleep(1)
+                            self.shutdown(code=self.return_code, system_shutdown=self.system_shutdown)
+
         # handle crashes and keyboard interrupts
         except (Exception, KeyboardInterrupt) as e:
             if isinstance(e, Exception):
@@ -1154,11 +1188,12 @@ class ShugrPiOS:
                 logger.error(error_msg)
                 pygame.display.message_box(window_title, error_msg, "error")
                 raise
-                self.shutdown(1)
-            self.shutdown(-1)
+                self.pre_shutdown(1)
+            self.pre_shutdown(-1)
 
     """ main loop """
     def update(self, dt):
+
         # dummy screen (to absorb initial dt spikes)
         if self.master_phase == -2:
             if self.timers["pre_init"].update(dt) or dt < 1:
@@ -1194,13 +1229,14 @@ class ShugrPiOS:
 
             self.rm.update(dt)
 
-            if (self.dialog_menu.showing and self.dialog_menu.has_ui) or self.virtual_keyboard.toggled:
-                self.rm.current_room[2].active = False
-                self.game_menu.um.active = False
-                self.game_wheel.selected[1] = False
-            else:
-                self.rm.current_room[2].active = True
-                self.game_menu.um.active = True
+            if not self.will_shutdown:
+                if (self.dialog_menu.showing and self.dialog_menu.has_ui) or self.virtual_keyboard.toggled:
+                    self.rm.current_room[2].active = False
+                    self.game_menu.um.active = False
+                    self.game_wheel.selected[1] = False
+                else:
+                    self.rm.current_room[2].active = True
+                    self.game_menu.um.active = True
 
             for _, room in self.rooms.items():
                 room[2].update(dt)
@@ -1227,7 +1263,7 @@ class ShugrPiOS:
 
             # shutdown
             if event.type == pygame.QUIT or (event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE):
-                self.shutdown()
+                self.pre_shutdown()
 
             if event.type == pygame.KEYDOWN:
                 if phase == -2:
@@ -1404,8 +1440,7 @@ class ShugrPiOS:
     def fade_to_game(self):
         current_game = self.game_wheel.lowest_game
         if current_game.installed:
-            self.curtain.set_color(DARK_GRAY)
-            self.curtain.target_alpha = 255
+            self.curtain.fade_to(255, color=DARK_GRAY)
             self.start_game = True
             self.am.stop_music()
         else:
@@ -1453,7 +1488,7 @@ class ShugrPiOS:
         self.running_game = [None, None]
         self.pause = False
 
-        self.curtain.target_alpha = 0
+        self.curtain.fade_to(0)
         self.game_wheel.selected[0] = True
 
         if audio_driver:
@@ -1463,7 +1498,7 @@ class ShugrPiOS:
 
         self.clock.tick(FPS)
 
-    """ installation utilities"""
+    """ installation utilities """
     def install_game(self):
         current_game = self.game_wheel.lowest_game
         if current_game.name not in self.installations:
@@ -1500,12 +1535,12 @@ class ShugrPiOS:
     def switch_phase(self, new_phase, dt, fade=False):
         if fade:
             if self.master_phase != new_phase:
-                self.curtain.target_alpha = 255
+                self.curtain.fade_to(255)
                 if self.curtain.flip:
                     self.master_phase = new_phase
                     self.am.reset_sounds()
                     self.am.play_music("shugrpi_bg")
-                    self.curtain.target_alpha = 0
+                    self.curtain.fade_to(0)
         else:
             if self.master_phase != new_phase:
                 self.master_phase = new_phase
@@ -1532,7 +1567,17 @@ class ShugrPiOS:
             elif self.dialog_menu.choice == 0:
                 self.game_menu.update_start_game_ui(1)
 
-    """time utilities"""
+    def _dump_log(self):
+        temp_log_file = os.path.join(base_path, "logs", "temp_session.log")
+        new_log_file = os.path.join(base_path, "logs", "session.log")
+        with open(temp_log_file, "r") as f:
+            full_log = f.read()
+        with open(new_log_file, "w") as f:
+            f.write(full_log)
+        quit_logger()
+        os.remove(temp_log_file)
+
+    """ time utilities """
     def set_time(self):
         self.sys_clock.set_time(self.hour_ui.label + ":" + self.minute_ui.label)
 
@@ -1573,12 +1618,28 @@ class ShugrPiOS:
             logger.error(f"Failed to update internet status: {e}")
 
     """ main shutdown """
-    def shutdown(self, code=0, system=False):
-        logger.info("Shutting down...")
+    def pre_shutdown(self, code=0, system_shutdown=False):
+        if not self.will_shutdown:
+            self.timers["shutdown"].start()
+            self.return_code = code
+            self.system_shutdown = system_shutdown
 
+            self.am.stop_music()
+
+            self.rm.current_room[2].active = False
+            self.game_menu.um.active = False
+            self.game_menu.toggled = True
+            self.game_menu.toggle()
+            self.game_wheel.selected = [True, False]
+
+            logger.info("Shutting down...")
+
+            self.will_shutdown = True
+
+    def shutdown(self, code=0, system_shutdown=False):
         # shutdown any running game
         if self.running_game[1] is not None:
-            self.running_game.terminate()
+            self.running_game[1].terminate()
 
         # cancel any ongoing game installations
         for installation in self.installations.values():
@@ -1595,7 +1656,11 @@ class ShugrPiOS:
 
         # final exit
         logger.info("Shutdown complete!")
-        sys.exit(code)
+        self._dump_log()
+        if not system_shutdown:
+            sys.exit(code)
+        else:
+            self.linux.power_off()
 
 
 # start up SHUGRPi OS
