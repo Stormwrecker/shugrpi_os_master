@@ -37,7 +37,7 @@ class Linux:
 
         self.logger.info(f"Attempting a connection to `{ssid}`...")
         if not self.is_shugrpi:
-            self.logger.info(f"Non-SHUGRPi device cannot connect to `{ssid}`")
+            self.logger.warning(f"Non-SHUGRPi device cannot connect to `{ssid}`")
             self._notify(f"Non-SHUGRPi device cannot connect to `{ssid}`")
             return -1
 
@@ -58,10 +58,7 @@ class Linux:
 
     def ping(self):
         code = self._call(["ping", "2", "-c", "8.8.8.8"])
-        if code == 0:
-            self.logger.info("SHUGRPi has access to the internet")
-        else:
-            self.logger.warning("SHUGRPi does not have access to the internet")
+        return code
 
     """git commands"""
     def git_clone(self, repo="https://github.com/Stormwrecker/shugrpi_os_master.git"):
@@ -123,6 +120,8 @@ class Linux:
     def _notify(self, msg):
         self.notification.reset(msg)
 
+
+"""unused code"""
 
 CATALOG_PATH = "/opt/catalog-repo"
 

@@ -34,7 +34,7 @@ class VirtualKeyboard:
         for i in range(125):
             pygame.draw.line(self.image, ([max(80 - i//2, 40) for _ in range(3)]), (0, i*2), (self.width, i*2), 2)
         self.rect = self.image.get_rect()
-        self.rect.midtop = (half_display_x, DISPLAY_HEIGHT)
+        self.rect.midtop = (HALF_DISPLAY_WIDTH, DISPLAY_HEIGHT)
 
         self.button_image = self.image.copy()
         self.button_image.set_colorkey(BLACK)

@@ -6,7 +6,9 @@ import platform
 import pygame
 import logging
 import time
-import subprocess
+import threading
+import shutil
+import json
 from socket import gethostbyname, gethostname
 from constants import *
 
@@ -17,6 +19,9 @@ retro_font = os.path.join(base_path, "fonts", "PressStart2P.ttf")
 font_cache = {}
 
 temp_dir = os.path.join(base_path, "logs")
+
+
+""" Logging Helpers"""
 
 def init_logger():
     if not os.path.exists(temp_dir):
@@ -32,6 +37,7 @@ def init_logger():
     logger = logging.getLogger("SHUGRPi System Log")
 
     return logger
+
 
 def quit_logger():
     logging.shutdown()
@@ -136,24 +142,99 @@ class AudioManager:
 
 # network management
 class NetworkManager:
-    def __init__(self, linux):
+    def __init__(self, linux, dm, logger):
+        self.linux = linux
+        self.dm = dm
+        self.logger = logger
+
         self.ssid = None
         self.psk_key = None
+
+        self.ip = self.get_ip()
+
         self.status = 0
         self.signal_strength = 0
-        self.connected = None
-        self.internet_access = None
-        self.ip = gethostbyname(gethostname())
-        self.linux = linux
 
-    def connect_to_wifi(self, ssid, psk_key):
-        self.linux.connect_to_wifi(ssid.value, psk_key.value)
+        self.logged = False
+
+        self.wifi_connected = self.check_wifi_connection()
+        self.internet_access = self.check_internet_access()
+
+        self.stop_event = threading.Event()
+        self.wifi_lock = threading.Lock()
+        self.wifi_thread = threading.Thread(name="SHUGRPi Network Manager", target=self.update, daemon=True)
+        self.wifi_thread.start()
+
+    def get_ip(self):
+        return gethostbyname(gethostname())
+
+    def connect_wifi(self, ssid, psk_key):
+        if self.linux.connect_to_wifi(ssid.value, psk_key.value) == 0:
+            self.dm.update("network", {"ssid":ssid.value, "psk-key":psk_key.value})
 
     def check_wifi_connection(self):
         return self.ip not in ["127.0.0.1", "localhost"]
 
     def check_internet_access(self):
-        self.linux.ping()
+        if self.linux.ping() == 0:
+            self.logger.info("SHUGRPi has access to the internet")
+            return True
+        else:
+            if not self.logged:
+                self.logger.warning("SHUGRPi does not have access to the internet")
+                self.logged = True
+            return False
+
+    def disconnect_wifi(self):
+        self.wifi_connected = False
+        self.internet_access = False
+        self.logger.info(f"NetworkManager: disconnected wifi")
+
+    def update(self):
+        try:
+            while not self.stop_event.wait(3):
+                if self.wifi_connected:
+                    with self.wifi_lock:
+                        self.internet_access = self.check_internet_access()
+        except Exception as e:
+            self.logger.error(f"NetworkManager: failed to update internet status: {e}")
+
+    def quit(self):
+        self.stop_event.set()
+        self.logger.info(f"NetworkManager: quit")
+
+
+# data management
+class DataManager:
+    def __init__(self, logger):
+        self.data_folder = "data"
+        self.save_file = os.path.join("data", "shugrpi_config.json")
+        self.logger = logger
+        self.data = self.load()
+
+    def load(self):
+        if not os.path.exists(self.data_folder):
+            os.mkdir("data")
+
+        if not os.path.exists(self.save_file):
+            with open(self.save_file, "w") as f:
+                f.write(json.dumps(DEFAULT_SAVE))
+            self.logger.warning("DataManager: save file not detected")
+            return DEFAULT_SAVE
+
+        else:
+            self.logger.info("DataManager: save file detected")
+            with open(self.save_file, "r") as f:
+                return json.load(f)
+
+    def save(self):
+        with open(self.save_file, "w") as f:
+            f.write(json.dumps(self.data, indent=4))
+        self.logger.info(f"DataManager: save")
+
+    def update(self, k, v):
+        if k in self.data:
+            self.data[k] = v
 
 
 """ Image Utilities """
@@ -193,16 +274,6 @@ def load_thumbnail(thumb_path, fail_image):
         if thumb_path is not None:
             logger.warning(f"unable to load thumbnail from '{thumb_path}'")
         return fail_image
-
-
-""" Internet Utilities"""
-
-def check_internet_status():
-    my_ip = gethostbyname(gethostname())
-    internet_connection = False
-    if my_ip != "127.0.0.1":
-        internet_connection = True
-    return internet_connection
 
 
 """ Text Utilities """
@@ -609,11 +680,11 @@ class DialogMenu:
             self.alpha = max(200, self.alpha)
             self.curtain_alpha = max(50, self.curtain_alpha)
             self.curtain_fade_speed = 20
-            self.y = half_display_y
+            self.y = HALF_DISPLAY_HEIGHT
         else:
             self.alpha = 0
             self.curtain_fade_speed = 10
-            self.y = half_display_y + 100
+            self.y = HALF_DISPLAY_HEIGHT + 100
 
         self.showing = False
         self.text = None
@@ -623,7 +694,7 @@ class DialogMenu:
 
         self.surf.fill(GRAY)
         self.surf.blit(self.shadow_surf, (0, 0))
-        self.rect.center = (half_display_x, self.y)
+        self.rect.center = (HALF_DISPLAY_WIDTH, self.y)
 
         self.has_ui = has_ui
 
@@ -722,14 +793,14 @@ class DialogMenu:
 
         if self.showing:
             self.alpha = min(self.alpha + 10 * dt, 255)
-            self.y += (half_display_y - self.y) * .15 * dt
+            self.y += (HALF_DISPLAY_HEIGHT - self.y) * .15 * dt
             self.curtain_alpha = min(self.curtain_alpha + self.curtain_fade_speed * dt, 200)
         else:
             self.alpha = max(0, self.alpha - 10 * dt)
-            self.y += (half_display_y + 50 - self.y) * .15 * dt
+            self.y += (HALF_DISPLAY_HEIGHT + 50 - self.y) * .15 * dt
             self.curtain_alpha = max(0, self.curtain_alpha - 10 * dt)
 
-        self.rect.center = (half_display_x, self.y)
+        self.rect.center = (HALF_DISPLAY_WIDTH, self.y)
 
     def fade_out(self):
         self.showing = False
@@ -931,8 +1002,8 @@ __all__ = ["init_logger",
            "CompatibilityManager",
            "AudioManager",
            "NetworkManager",
+           "DataManager",
            "load_image",
-           "check_internet_status",
            "get_font",
            "draw_text",
            "Text",
