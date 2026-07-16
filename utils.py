@@ -150,32 +150,41 @@ class NetworkManager:
         self.ssid = None
         self.psk_key = None
 
-        self.ip = self.get_ip()
+        self.ip = self._get_ip()
 
         self.status = 0
         self.signal_strength = 0
 
         self.logged = False
 
-        self.wifi_connected = self.check_wifi_connection()
-        self.internet_access = self.check_internet_access()
+        self.wifi_connected = self._check_wifi_connection()
+        self.internet_access = self._check_internet_access()
 
         self.stop_event = threading.Event()
         self.wifi_lock = threading.Lock()
-        self.wifi_thread = threading.Thread(name="SHUGRPi Network Manager", target=self.update, daemon=True)
+        self.wifi_thread = threading.Thread(name="SHUGRPi Network Manager", target=self._update_status, daemon=True)
         self.wifi_thread.start()
 
-    def get_ip(self):
+        self.text_fields = {}
+
+        self.ui_group = pygame.sprite.Group()
+
+    def _get_ip(self):
         return gethostbyname(gethostname())
 
-    def connect_wifi(self, ssid, psk_key):
-        if self.linux.connect_to_wifi(ssid.value, psk_key.value) == 0:
-            self.dm.update("network", {"ssid":ssid.value, "psk-key":psk_key.value})
-
-    def check_wifi_connection(self):
+    def _check_wifi_connection(self):
         return self.ip not in ["127.0.0.1", "localhost"]
 
-    def check_internet_access(self):
+    def _update_status(self):
+        try:
+            while not self.stop_event.wait(3):
+                if self.wifi_connected:
+                    with self.wifi_lock:
+                        self.internet_access = self._check_internet_access()
+        except Exception as e:
+            self.logger.error(f"NetworkManager: failed to update internet status: {e}")
+
+    def _check_internet_access(self):
         if self.linux.ping() == 0:
             self.logger.info("SHUGRPi has access to the internet")
             return True
@@ -185,19 +194,29 @@ class NetworkManager:
                 self.logged = True
             return False
 
+    def setup_ui(self, virtual_keyboard):
+        self.header_text = Text("Network Settings", HALF_DISPLAY_WIDTH, 60, WHITE, 15, default_font, True)
+        self.connect_ui = UiElement("Connect", HALF_DISPLAY_WIDTH, 100, 0, 0, size=10, font=default_font, group=self.ui_group, func=lambda: self.connect_wifi(self.text_fields["ssid"], self.text_fields["psk_key"]))
+
+        self.ssid_text = Text("SSID", HALF_DISPLAY_WIDTH - 50, 250, WHITE, 12, default_font, True)
+        self.text_fields["ssid"] = TextField(HALF_DISPLAY_WIDTH + 100, 250, 1, 0, 200, 30, "Enter your SSID here", group=self.ui_group, keyboard=virtual_keyboard)
+
+        self.password_text = Text("Password", HALF_DISPLAY_WIDTH - 70, 300, WHITE, 12, default_font, True)
+        self.text_fields["psk_key"] = TextField(HALF_DISPLAY_WIDTH + 100, 300, 2, 0, 200, 30, "Enter your password here", group=self.ui_group, keyboard=virtual_keyboard)
+
+    def connect_wifi(self, ssid, psk_key):
+        if self.linux.connect_to_wifi(ssid.value, psk_key.value) == 0:
+            self.dm.update("network", {"ssid":ssid.value, "psk-key":psk_key.value})
+
     def disconnect_wifi(self):
         self.wifi_connected = False
         self.internet_access = False
         self.logger.info(f"NetworkManager: disconnected wifi")
 
-    def update(self):
-        try:
-            while not self.stop_event.wait(3):
-                if self.wifi_connected:
-                    with self.wifi_lock:
-                        self.internet_access = self.check_internet_access()
-        except Exception as e:
-            self.logger.error(f"NetworkManager: failed to update internet status: {e}")
+    def draw(self, display):
+        self.header_text.draw(display)
+        self.ssid_text.draw(display)
+        self.password_text.draw(display)
 
     def quit(self):
         self.stop_event.set()
@@ -223,14 +242,15 @@ class DataManager:
             return DEFAULT_SAVE
 
         else:
-            self.logger.info("DataManager: save file detected")
             with open(self.save_file, "r") as f:
-                return json.load(f)
+                data = json.load(f)
+            self.logger.info(f"DataManager: load {[f"{k}: {v}" if k != "loaded_games" else f"{k}: {str(v)[:21] + '...' + str(v)[-2:]}" for k, v in data.items()]}")
+            return data
 
     def save(self):
         with open(self.save_file, "w") as f:
             f.write(json.dumps(self.data, indent=4))
-        self.logger.info(f"DataManager: save")
+        self.logger.info(f"DataManager: save {[f"{k}: {v}" if k != "loaded_games" else f"{k}: {str(v)[:21] + '...' + str(v)[-2:]}" for k, v in self.data.items()]}")
 
     def update(self, k, v):
         if k in self.data:
@@ -837,6 +857,8 @@ class TextField(pygame.sprite.Sprite):
         self.actual_rect = self.image.get_rect()
         self.actual_rect.center = (x, y)
 
+        self.original_pos = self.actual_rect.topleft
+
         self.keyboard = keyboard
 
         self.selected = False
@@ -846,6 +868,9 @@ class TextField(pygame.sprite.Sprite):
         self.scroll = 0
 
         self.value = ""
+
+        self.in_view = False
+        self.speed = 0.1
 
     def update(self, dt, col, row):
         self.selected = False
@@ -859,8 +884,15 @@ class TextField(pygame.sprite.Sprite):
             if not self.selected:
                 self.true_selected = False
 
+        if self.in_view:
+            self.actual_rect.centerx = ease_out_to(self.actual_rect.centerx, HALF_DISPLAY_WIDTH, self.speed * dt)
+            self.actual_rect.centery = ease_out_to(self.actual_rect.centery, 200, self.speed * dt)
+        else:
+            self.actual_rect.left = ease_out_to(self.actual_rect.left, self.original_pos[0] + 6, self.speed * dt)
+            self.actual_rect.top = ease_out_to(self.actual_rect.top, self.original_pos[1] + 6, self.speed * dt)
+
     def action(self):
-        self.keyboard.toggle()
+        self.keyboard.toggle(self)
 
     def update_text(self, k):
         if k != "BACKSPACE":
@@ -878,6 +910,7 @@ class TextField(pygame.sprite.Sprite):
     def clear(self):
         self.text.set_text("")
         self.text_input = ""
+        self.value = ""
 
     def draw(self, display):
         self.image.fill(GRAY)

@@ -57,7 +57,7 @@ class Linux:
             return 1
 
     def ping(self):
-        code = self._call(["ping", "2", "-c", "8.8.8.8"])
+        code = self._call(["ping", "-c", "2", "8.8.8.8"])
         return code
 
     """git commands"""
@@ -112,7 +112,7 @@ class Linux:
 
     def _run(self, proc):
         if self.is_shugrpi:
-            done_proc = subprocess.run(proc, check=True, capture_output=True, text=True)
+            done_proc = subprocess.run(proc, capture_output=True, text=True)
             return done_proc.returncode, done_proc.stderr
         return -1, None
 

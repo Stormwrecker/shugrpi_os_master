@@ -1121,13 +1121,12 @@ class ShugrPiOS:
         self.create_ui_manager("clock", ui_group)
 
     def setup_network_room(self):
-        ui_group = pygame.sprite.Group()
-        self.connect_ui = UiElement("Connect", HALF_DISPLAY_WIDTH, 100, 0, 0, size=10, font=retro_font, group=ui_group, func=lambda: self.nm.connect_wifi(self.text_fields["ssid"], self.text_fields["psk_key"]))
-        self.text_fields["ssid"] = TextField(HALF_DISPLAY_WIDTH - 125, 200, 1, 0, 200, 30, "Enter your SSID here", group=ui_group, keyboard=self.virtual_keyboard)
-        self.text_fields["psk_key"] = TextField(HALF_DISPLAY_WIDTH + 125, 200, 1, 1, 200, 30, "Enter your password here", group=ui_group, keyboard=self.virtual_keyboard)
-        back_btn = self.add_back_button(ui_group)
+        self.nm.setup_ui(self.virtual_keyboard)
+        self.add_text_fields(self.nm.text_fields)
 
-        self.create_ui_manager("network", ui_group)
+        back_btn = self.add_back_button(self.nm.ui_group, 3)
+
+        self.create_ui_manager("network", self.nm.ui_group)
 
     def setup_power_room(self):
         ui_group = pygame.sprite.Group()
@@ -1137,8 +1136,8 @@ class ShugrPiOS:
 
         self.create_ui_manager("power", ui_group)
 
-    def add_back_button(self, ui_group):
-        back_button = UiElement("Back", DISPLAY_WIDTH - 50, DISPLAY_HEIGHT - 20, 2, 0, group=ui_group, func=lambda: self.switch_room("games"))
+    def add_back_button(self, ui_group, row=2):
+        back_button = UiElement("Back", DISPLAY_WIDTH - 50, DISPLAY_HEIGHT - 20, row, 0, group=ui_group, func=lambda: self.switch_room("games"))
         return back_button
 
     """ main runner """
@@ -1427,6 +1426,7 @@ class ShugrPiOS:
 
             self.game_menu.draw(self.rooms["games"][1])
             self.colon.draw(self.rooms["clock"][1])
+            self.nm.draw(self.rooms["network"][1])
 
             self.rm.draw(self.display)
 
@@ -1580,6 +1580,10 @@ class ShugrPiOS:
             elif self.dialog_menu.choice == 0:
                 self.game_menu.update_start_game_ui(1)
 
+    def add_text_fields(self, d):
+        for k, v in d.items():
+            self.text_fields[k] = v
+
     def _dump_log(self):
         temp_log_file = os.path.join(base_path, "logs", "temp_session.log")
         new_log_file = os.path.join(base_path, "logs", "session.log")
@@ -1622,6 +1626,8 @@ class ShugrPiOS:
                 self.timers["shutdown"].start()
                 self.return_code = code
                 self.system_shutdown = system_shutdown
+                self.virtual_keyboard.toggled = True
+                self.virtual_keyboard.toggle(self.virtual_keyboard.text_field)
 
                 self.am.stop_music()
 

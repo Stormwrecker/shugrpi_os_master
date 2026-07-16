@@ -14,6 +14,8 @@ class VirtualKeyboard:
     def __init__(self):
         self.um = None
 
+        self.text_field = None
+
         self._setup_keys()
 
         self.width = DISPLAY_WIDTH - 50
@@ -55,6 +57,8 @@ class VirtualKeyboard:
 
         self.last_key = None
 
+        self._setup_curtain()
+
     def _setup_keys(self):
         self.keys = [chr(i) for i in range(0, 1000) if chr(i).isascii() and chr(i).isprintable()]
         self.keys = self.keys[33:] + self.keys[:32]
@@ -89,13 +93,25 @@ class VirtualKeyboard:
 
         col += 1
         btn = UiElement("Enter", self.x_start + (self.size + self.padding) * (col+2), 20 + (self.size + self.padding) * row, row, col-1,
-                        group=self.button_group, size=self.size, font=retro_font, centered=True, func=self.toggle)
+                        group=self.button_group, size=self.size, font=retro_font, centered=True, func=lambda: self.toggle(self.text_field))
         btn_rect = btn.rect.copy().inflate(-10, -10)
         self.button_rects.append(btn_rect)
 
         for rect in self.button_rects:
             r = rect.copy().inflate(4, 4)
             self.button_shadow_rects.append(r)
+
+    def _setup_curtain(self):
+        self.curtain = pygame.Surface((1, 1)).convert_alpha()
+        self.curtain = pygame.transform.scale(self.curtain, (DISPLAY_WIDTH, DISPLAY_HEIGHT - 60))
+        self.curtain_rect = self.curtain.get_rect()
+        self.curtain_rect.topleft = (0, 30)
+
+        self.curtain.fill(DARKER_GRAY)
+
+        self.curtain_alpha = 0
+        self.curtain.set_alpha(self.curtain_alpha)
+        self.curtain_fade_speed = 10
 
     def _return_key(self):
         btn_mgr = self.button_manager
@@ -109,18 +125,29 @@ class VirtualKeyboard:
     def _return_backspace(self):
         self.last_key = "BACKSPACE"
 
-    def toggle(self):
+    def toggle(self, text_field=None):
         self.last_key = ""
         self.toggled = not self.toggled
         if self.toggled:
             self.button_manager.reset()
+            self.text_field = text_field
+            self.text_field.in_view = True
+        else:
+            if self.text_field is not None:
+                self.text_field.in_view = False
 
     def update(self, dt):
         self.button_manager.update(dt)
+        self.curtain.set_alpha(self.curtain_alpha)
+
         if self.toggled:
             self.target_scroll = -225
+            self.curtain_alpha = min(self.curtain_alpha + self.curtain_fade_speed * dt, 200)
         else:
             self.target_scroll = 100
+            self.curtain_alpha = max(0, self.curtain_alpha - 10 * dt)
+            if self.curtain_alpha == 0:
+                self.text_field = None
 
         if self.scroll != self.target_scroll:
             self.scroll = ease_out_to(self.scroll, self.target_scroll, 0.15 * dt)
@@ -144,6 +171,10 @@ class VirtualKeyboard:
                     selected_text_field.update_text(self.last_key)
 
     def draw(self, display):
+        if self.curtain_alpha:
+            display.blit(self.curtain, self.curtain_rect)
+            self.text_field.draw(display)
+
         display.blit(self.image, (self.rect.x, self.rect.y + self.scroll))
         display.blit(self.button_image, (self.rect.x, self.rect.y + self.scroll))
 
