@@ -80,19 +80,18 @@ class VirtualKeyboard:
                 col = 0
 
         col += 1
-        btn = UiElement("Space", self.x_start + (self.size + self.padding) * col, 20 + (self.size + self.padding) * row, row, col-1,
+        btn = UiElement("Space", self.x_start + (self.size + self.padding) * col + 3, 20 + (self.size + self.padding) * row, row, col-1,
                         group=self.button_group, size=self.size, font=retro_font, centered=True, func=self._return_space)
         btn_rect = btn.rect.copy().inflate(-10, -10)
         self.button_rects.append(btn_rect)
 
         col += 1
-        btn = UiElement("←", self.x_start + (self.size + self.padding) * (col+1), 20 + (self.size + self.padding) * row, row, col-1,
+        btn = UiElement("Delete", self.x_start + (self.size + self.padding) * (col+1) + 58, 20 + (self.size + self.padding) * row, row, col-1,
                         group=self.button_group, size=self.size, font=retro_font, centered=True, func=self._return_backspace)
         btn_rect = btn.rect.copy().inflate(-10, -10)
         self.button_rects.append(btn_rect)
 
-        col += 1
-        btn = UiElement("Enter", self.x_start + (self.size + self.padding) * (col+2), 20 + (self.size + self.padding) * row, row, col-1,
+        btn = UiElement("  Enter  ", self.x_start + (self.size + self.padding) * (col) + 64, 20 + (self.size + self.padding) * (row+1), row+1, 0,
                         group=self.button_group, size=self.size, font=retro_font, centered=True, func=lambda: self.toggle(self.text_field))
         btn_rect = btn.rect.copy().inflate(-10, -10)
         self.button_rects.append(btn_rect)
@@ -135,6 +134,8 @@ class VirtualKeyboard:
         else:
             if self.text_field is not None:
                 self.text_field.in_view = False
+                if self.text_field.needs_hash:
+                    self.text_field.hashed = True
 
     def update(self, dt):
         self.button_manager.update(dt)

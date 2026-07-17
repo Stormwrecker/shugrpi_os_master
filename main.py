@@ -196,12 +196,18 @@ class FloatingLogo(pygame.sprite.Sprite):
         self.timer.reset()
         self.wait_timer.reset()
 
-    def update(self, dt):
-        if self.start_timer.update(dt):
-            if self.alpha < self.max_alpha and not self.toggled:
-                self.alpha += dt
+    def update(self, dt, room_name):
+        if room_name == "games":
+            if self.start_timer.update(dt):
+                if self.alpha < self.max_alpha and not self.toggled:
+                    self.alpha += dt
+                else:
+                    self.toggled = True
+        else:
+            if self.alpha > 0:
+                self.alpha -= dt*2
             else:
-                self.toggled = True
+                self.alpha = 0
 
         if self.toggled:
             if self.timer.update(dt):
@@ -1237,7 +1243,7 @@ class ShugrPiOS:
 
         # main menu
         elif self.master_phase == 0:
-            self.floating_logo.update(dt)
+            self.floating_logo.update(dt, self.current_room[3])
 
             self.dialog_menu.update(dt)
 
@@ -1260,6 +1266,8 @@ class ShugrPiOS:
             self.game_menu.update(dt)
 
             self.game_wheel.check_game_menu_toggled(self.game_menu.toggled)
+
+            self.nm.update()
 
             self.notification.update(dt)
 
@@ -1413,16 +1421,18 @@ class ShugrPiOS:
         elif self.master_phase == 0:
             self.display.fill(DARK_GRAY)
 
-            self.rm.clear()
-
             self.floating_logo.draw(self.display)
 
-            for _, room in self.rooms.items():
-                room[1].blit(self.banner_top, (self.banner_top_rect.x, self.banner_top_rect.y))
-                room[1].blit(self.banner_bottom, (self.banner_bottom_rect.x, self.banner_bottom_rect.y))
+            self.rm.clear()
 
             for _, room in self.rooms.items():
-                room[2].draw(room[1])
+                if room[0] in self.rm.active_rooms:
+                    room[1].blit(self.banner_top, (self.banner_top_rect.x, self.banner_top_rect.y))
+                    room[1].blit(self.banner_bottom, (self.banner_bottom_rect.x, self.banner_bottom_rect.y))
+
+            for _, room in self.rooms.items():
+                if room[0] in self.rm.active_rooms:
+                    room[2].draw(room[1])
 
             self.game_menu.draw(self.rooms["games"][1])
             self.colon.draw(self.rooms["clock"][1])
@@ -1432,11 +1442,11 @@ class ShugrPiOS:
 
             self.notification.draw(self.display)
 
+            draw_text(self.display, str(round(self.clock.get_fps())), 10, DISPLAY_HEIGHT - 20, WHITE, 10, retro_font)
+
             self.virtual_keyboard.draw(self.display)
 
             self.dialog_menu.draw(self.display)
-
-            draw_text(self.display, str(round(self.clock.get_fps())), 100, 10, WHITE, 10, retro_font)
 
             self.curtain.draw(self.display)
 

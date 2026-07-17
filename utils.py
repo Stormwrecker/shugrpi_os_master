@@ -152,8 +152,9 @@ class NetworkManager:
 
         self.ip = self._get_ip()
 
-        self.status = 0
+        self.statuses = ["Poor", "Moderate", "Good", "Excellent"]
         self.signal_strength = 0
+        self.status = "inactive"
 
         self.logged = False
 
@@ -173,16 +174,30 @@ class NetworkManager:
         return gethostbyname(gethostname())
 
     def _check_wifi_connection(self):
-        return self.ip not in ["127.0.0.1", "localhost"]
+        new_ip = self._get_ip()
+        if new_ip not in ["127.0.0.1", "localhost"]:
+            self.ip = new_ip
+            return True
+        return False
 
     def _update_status(self):
         try:
             while not self.stop_event.wait(3):
+                self.wifi_connected = self._check_wifi_connection()
                 if self.wifi_connected:
                     with self.wifi_lock:
                         self.internet_access = self._check_internet_access()
+                        if self.internet_access:
+                            self.status = "connected"
+                        else:
+                            self.status = "no internet"
+                else:
+                    with self.wifi_lock:
+                        self.status = "not connected"
         except Exception as e:
             self.logger.error(f"NetworkManager: failed to update internet status: {e}")
+            with self.wifi_lock:
+                self.status = "error"
 
     def _check_internet_access(self):
         if self.linux.ping() == 0:
@@ -195,14 +210,27 @@ class NetworkManager:
             return False
 
     def setup_ui(self, virtual_keyboard):
-        self.header_text = Text("Network Settings", HALF_DISPLAY_WIDTH, 60, WHITE, 15, default_font, True)
-        self.connect_ui = UiElement("Connect", HALF_DISPLAY_WIDTH, 100, 0, 0, size=10, font=default_font, group=self.ui_group, func=lambda: self.connect_wifi(self.text_fields["ssid"], self.text_fields["psk_key"]))
+        first_col_x = 75
+        first_col_y = 244
 
-        self.ssid_text = Text("SSID", HALF_DISPLAY_WIDTH - 50, 250, WHITE, 12, default_font, True)
-        self.text_fields["ssid"] = TextField(HALF_DISPLAY_WIDTH + 100, 250, 1, 0, 200, 30, "Enter your SSID here", group=self.ui_group, keyboard=virtual_keyboard)
+        second_col_x = HALF_DISPLAY_WIDTH + 125
+        second_col_y = 250
 
-        self.password_text = Text("Password", HALF_DISPLAY_WIDTH - 70, 300, WHITE, 12, default_font, True)
-        self.text_fields["psk_key"] = TextField(HALF_DISPLAY_WIDTH + 100, 300, 2, 0, 200, 30, "Enter your password here", group=self.ui_group, keyboard=virtual_keyboard)
+        self.main_header_text = Text("Network Settings", HALF_DISPLAY_WIDTH, 85, WHITE, 25, default_font, centered=True)
+
+        self.wifi_header_text = Text("Network Status", 190, first_col_y - 50, WHITE, 15, default_font, True)
+        self.wifi_name_text = Text(f"Wifi Connection: {self.ssid}", first_col_x, first_col_y, WHITE, 11, retro_font, False)
+        self.status_text = Text(f"Status: {self.status}", first_col_x, first_col_y + 50, WHITE, 11, retro_font, False)
+        self.signal_text = Text(f"Signal Strength: {self.statuses[self.signal_strength]}", first_col_x, first_col_y + 100, WHITE, 11, retro_font, False)
+
+        self.connect_header_text = Text("Wifi Setup", second_col_x + 50, first_col_y - 50, WHITE, 15, default_font, True)
+
+        self.ssid_text = Text("SSID", second_col_x - 50, second_col_y + 2, WHITE, 12, default_font, True)
+        self.text_fields["ssid"] = TextField(second_col_x + 100, second_col_y, 0, 0, 200, 30, "Enter your SSID here", group=self.ui_group, keyboard=virtual_keyboard)
+        self.password_text = Text("Password", second_col_x - 70, second_col_y + 52, WHITE, 12, default_font, True)
+        self.text_fields["psk_key"] = TextField(second_col_x + 100, second_col_y + 50, 1, 0, 200, 30, "Enter your password here", group=self.ui_group, keyboard=virtual_keyboard, needs_hash=True)
+
+        self.connect_ui = UiElement("Connect", second_col_x + 35, second_col_y + 100, 2, 0, size=10, font=default_font, group=self.ui_group, func=lambda: self.connect_wifi(self.text_fields["ssid"], self.text_fields["psk_key"]))
 
     def connect_wifi(self, ssid, psk_key):
         if self.linux.connect_to_wifi(ssid.value, psk_key.value) == 0:
@@ -213,8 +241,20 @@ class NetworkManager:
         self.internet_access = False
         self.logger.info(f"NetworkManager: disconnected wifi")
 
+    def update(self):
+        self.wifi_name_text.set_text(f"Wifi Connection: " + str(self.ssid))
+        self.status_text.set_text(f"Status: {self.status}")
+        self.signal_text.set_text(f"Signal Strength: {self.statuses[self.signal_strength] if self.wifi_connected else "None"}")
+
     def draw(self, display):
-        self.header_text.draw(display)
+        self.main_header_text.draw(display)
+
+        self.wifi_header_text.draw(display)
+        self.wifi_name_text.draw(display)
+        self.status_text.draw(display)
+        self.signal_text.draw(display)
+
+        self.connect_header_text.draw(display)
         self.ssid_text.draw(display)
         self.password_text.draw(display)
 
@@ -339,13 +379,14 @@ class Text(pygame.sprite.Sprite):
             self.rect.topleft = (self.x, self.y)
 
     def set_text(self, new_text):
-        self.text = str(new_text)
-        self.image = self.font.render(self.text, False, self.color)
-        self.rect = self.image.get_rect()
-        if self.centered:
-            self.rect.center = (self.x, self.y)
-        else:
-            self.rect.topleft = (self.x, self.y)
+        if self.text != str(new_text):
+            self.text = str(new_text)
+            self.image = self.font.render(self.text, False, self.color)
+            self.rect = self.image.get_rect()
+            if self.centered:
+                self.rect.center = (self.x, self.y)
+            else:
+                self.rect.topleft = (self.x, self.y)
 
     def _get_font(self, font, size):
         return get_font(font, size)
@@ -840,7 +881,7 @@ class DialogMenu:
 
 # text field
 class TextField(pygame.sprite.Sprite):
-    def __init__(self, x, y, row, col, w, h, default_text, group, keyboard):
+    def __init__(self, x, y, row, col, w, h, default_text, group, keyboard, needs_hash=False):
         pygame.sprite.Sprite.__init__(self, group)
 
         self.size = h//2
@@ -857,7 +898,8 @@ class TextField(pygame.sprite.Sprite):
         self.actual_rect = self.image.get_rect()
         self.actual_rect.center = (x, y)
 
-        self.original_pos = self.actual_rect.topleft
+        self.original_pos = list(self.actual_rect.center)
+        self.pos = list(self.actual_rect.center)
 
         self.keyboard = keyboard
 
@@ -870,7 +912,10 @@ class TextField(pygame.sprite.Sprite):
         self.value = ""
 
         self.in_view = False
-        self.speed = 0.1
+        self.speed = 0.15
+
+        self.needs_hash = needs_hash
+        self.hashed = False
 
     def update(self, dt, col, row):
         self.selected = False
@@ -885,14 +930,17 @@ class TextField(pygame.sprite.Sprite):
                 self.true_selected = False
 
         if self.in_view:
-            self.actual_rect.centerx = ease_out_to(self.actual_rect.centerx, HALF_DISPLAY_WIDTH, self.speed * dt)
-            self.actual_rect.centery = ease_out_to(self.actual_rect.centery, 200, self.speed * dt)
+            self.pos[0] = ease_out_to(self.pos[0], HALF_DISPLAY_WIDTH, self.speed * dt)
+            self.pos[1] = ease_out_to(self.pos[1], 175, self.speed * dt)
         else:
-            self.actual_rect.left = ease_out_to(self.actual_rect.left, self.original_pos[0] + 6, self.speed * dt)
-            self.actual_rect.top = ease_out_to(self.actual_rect.top, self.original_pos[1] + 6, self.speed * dt)
+            self.pos[0] = ease_out_to(self.pos[0], self.original_pos[0], self.speed * dt)
+            self.pos[1] = ease_out_to(self.pos[1], self.original_pos[1], self.speed * dt)
+        self.actual_rect.center = (int(self.pos[0]), int(self.pos[1]))
 
     def action(self):
         self.keyboard.toggle(self)
+        self.hashed = False
+        self.text.set_text(self.value)
 
     def update_text(self, k):
         if k != "BACKSPACE":
@@ -906,6 +954,11 @@ class TextField(pygame.sprite.Sprite):
             self.text.rect.x = self.scroll
 
         self.value = self.text_input
+
+        if self.hashed:
+            self.text.set_text("*" * len(self.value))
+        else:
+            self.text.set_text(self.value)
 
     def clear(self):
         self.text.set_text("")
@@ -983,9 +1036,11 @@ class RoomManager:
         self.x = 0
         self.y = 0
         self.current_room = list(self.rooms.values())[0]
+        self.active_rooms = [self.current_room[0]]
 
     def switch_to(self, name):
         target_room = self.rooms[name]
+        self.active_rooms = [self.current_room[0], target_room[0]]
         target_room[2].reset()
         target_room[0].move(0, 0)
         if target_room[2] is not None:
