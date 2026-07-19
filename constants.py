@@ -62,13 +62,14 @@ SHUGRPi OS save data
 ``network`` is the network that was last connected to
 """
 DEFAULT_SAVE = {"sort":0.0,
+                "num_games":0,
                 "loaded_games":[],
                 "last_timestamp":None,
                 "network":{"ssid":None, "psk-key":None}}
 
 # messages
 WELCOME_MSG = "Welcome to the SHUGRPi!"
-INSTALLATION_MSG = " must be fully installed before playing. Continue?\n^(this requires an internet connection)"
+INSTALLATION_MSG = " must be fully installed before playing. Continue? ^(this requires an internet connection)^"
 
 
 # get pygame for necessary values

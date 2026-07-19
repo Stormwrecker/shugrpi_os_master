@@ -147,8 +147,10 @@ class NetworkManager:
         self.dm = dm
         self.logger = logger
 
-        self.ssid = None
-        self.psk_key = None
+        self.ssid = self.dm.data["network"]["ssid"]
+        self.psk_key = self.dm.data["network"]["psk-key"]
+
+        self.linux.reload_wifi(self.ssid, self.psk_key)
 
         self.ip = self._get_ip()
 
@@ -233,12 +235,13 @@ class NetworkManager:
         self.connect_ui = UiElement("Connect", second_col_x + 35, second_col_y + 100, 2, 0, size=10, font=default_font, group=self.ui_group, func=lambda: self.connect_wifi(self.text_fields["ssid"], self.text_fields["psk_key"]))
 
     def connect_wifi(self, ssid, psk_key):
-        if self.linux.connect_to_wifi(ssid.value, psk_key.value) == 0:
+        if self.linux.connect_wifi(ssid.value, psk_key.value) == 0:
             self.dm.update("network", {"ssid":ssid.value, "psk-key":psk_key.value})
 
     def disconnect_wifi(self):
         self.wifi_connected = False
         self.internet_access = False
+        self.linux.disconnect_wifi()
         self.logger.info(f"NetworkManager: disconnected wifi")
 
     def update(self):
@@ -764,13 +767,13 @@ class DialogMenu:
             self.ui_group = pygame.sprite.Group()
             for opt in options:
                 if opt in ["No", "Cancel"]:
-                    ok_btn = UiElement(opt, self.rect.width // 2 + 50, self.rect.height - 50, 0, 0, 20, font=retro_font, group=self.ui_group,
+                    ok_btn = UiElement(opt, self.rect.width // 2 + 100, self.rect.height - 50, 0, 0, 20, font=retro_font, group=self.ui_group,
                                        func=self.fade_out)
                 elif opt == "OK":
                     ok_btn = UiElement(opt, self.rect.width // 2, self.rect.height - 50, 0, 0, 20, font=retro_font, group=self.ui_group,
                                        func=self.fade_out)
-                elif opt in ["Yes", "Install"]:
-                    ok_btn = UiElement(opt, self.rect.width // 2 - 50, self.rect.height - 50, 0, 1, 20, font=retro_font, group=self.ui_group,
+                elif opt in ["Yes", "Install", "Uninstall", "Remove"]:
+                    ok_btn = UiElement(opt, self.rect.width // 2 - 100, self.rect.height - 50, 0, 1, 20, font=retro_font, group=self.ui_group,
                                        func=self.fade_out)
             self.um = UiManager(self.ui_group)
 
@@ -827,13 +830,13 @@ class DialogMenu:
             msg_lines = self.msg.splitlines()
             normal_size = 15
             for i, msg in enumerate(msg_lines):
-                text = Text(msg, self.rect.width // 2, (self.rect.height // 3 + 10) - 15 * (len(msg_lines)) // 2 + (normal_size * 2 * i), WHITE, normal_size, font=retro_font, centered=True)
+                text = Text(msg, self.rect.width // 2, (self.rect.height // 3) - 15 * (len(msg_lines)) // 2 + (normal_size * 2 * i), WHITE, normal_size, font=retro_font, centered=True)
                 text.draw(self.surf)
 
             small_msg_lines = self.small_msg.splitlines()
             small_size = 10
             for i, msg in enumerate(small_msg_lines):
-                text = Text(msg, self.rect.width // 2, (self.rect.height // 3 + 10) - 15 * (len(msg_lines)) // 2 + (normal_size * 2 * i), WHITE, small_size, font=retro_font, centered=True)
+                text = Text(msg, self.rect.width // 2, (self.rect.height // 3) - 15 * (len(msg_lines)) // 2 + (normal_size * 2 * i), WHITE, small_size, font=retro_font, centered=True)
                 text.draw(self.surf)
 
         self.choice = None
@@ -842,9 +845,9 @@ class DialogMenu:
         self.curtain.set_alpha(self.curtain_alpha)
 
     def update(self, dt):
-        self.surf.set_alpha(self.alpha)
-        self.ui_surf.set_alpha(self.alpha)
-        self.curtain.set_alpha(self.curtain_alpha)
+        self.surf.set_alpha(int(self.alpha))
+        self.ui_surf.set_alpha(int(self.alpha))
+        self.curtain.set_alpha(int(self.curtain_alpha))
 
         if self.has_ui:
             self.um.update(dt)

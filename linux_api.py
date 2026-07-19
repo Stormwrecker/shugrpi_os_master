@@ -26,7 +26,7 @@ class Linux:
         return code
 
     """network commands"""
-    def connect_to_wifi(self, ssid, psk_key):
+    def connect_wifi(self, ssid, psk_key):
         if not len(ssid):
             self._notify(f"`SSID` field cannot be empty")
             return -1
@@ -42,10 +42,10 @@ class Linux:
             return -1
 
         con_name = "shugrpi-wifi"
-        make_profile_proc, _ = self._run(["nmcli", "con", "add", "type", "wifi", "ifname"
-                                       "con-name", con_name, "ssid", ssid])
+        make_profile_proc, _ = self._run(["nmcli", "con", "add", "type", "wifi", "ifname", "con-name", con_name, "ssid", ssid])
         set_security_proc, _ = self._run(["nmcli", "con", "mod", con_name, "wifi-sec.key-mgmt", "wpa-psk"])
         set_psk_proc, _ = self._run(["nmcli", "con", "mod", con_name, "wifi-sec.key-psk", psk_key])
+
         all_procs = [make_profile_proc, set_security_proc, set_psk_proc]
         if 1 not in all_procs and -1 not in all_procs:
             self.logger.info(f"Connected successfully to `{ssid}` using the password '{len(psk_key) * '*'}'")
@@ -55,6 +55,12 @@ class Linux:
             self.logger.error(f"Failed to connect to `{ssid}` using the password '{len(psk_key) * '*'}'")
             self._notify(f"Failed to connect to `{ssid}`")
             return 1
+
+    def reload_wifi(self, ssid, psk_key):
+        pass
+
+    def disconnect_wifi(self):
+        pass
 
     def ping(self):
         code = self._call(["ping", "-c", "2", "8.8.8.8"])

@@ -48,11 +48,12 @@ import time
 import json
 import math
 import random
-from shutil import copy
+from shutil import copy, rmtree
 
 
 # initialize pygame with necessary setups
 def init_pygame():
+    os.environ["SDL_AUDIODRIVER"] = "dummy"
     pygame.init()
     logger.info("Initialized pygame-ce")
     active_driver = None
@@ -127,7 +128,7 @@ class Curtain(pygame.sprite.Sprite):
         self.target_alpha = 255
 
     def update(self, dt):
-        if self.alpha != self.target_alpha:
+        if int(self.alpha) != self.target_alpha:
             if self.alpha > self.target_alpha:
                 self.alpha = max(int(self.alpha - (self.speed * dt)), self.target_alpha)
                 self.flip = False
@@ -137,7 +138,7 @@ class Curtain(pygame.sprite.Sprite):
         else:
             if self.alpha == 255:
                 self.flip = True
-        self.image.set_alpha(self.alpha)
+        self.image.set_alpha(int(self.alpha))
 
     def fade_to(self, alpha=0, speed=20, color=None):
         self.target_alpha = alpha
@@ -218,7 +219,7 @@ class FloatingLogo(pygame.sprite.Sprite):
                     if self.wait_timer.update(dt):
                         self.reset()
 
-        self.image.set_alpha(self.alpha)
+        self.image.set_alpha(int(self.alpha))
 
         self.floating_x += self.dx * dt
         self.floating_y += self.dy * dt
@@ -227,6 +228,94 @@ class FloatingLogo(pygame.sprite.Sprite):
     def draw(self, display):
         if self.alpha:
             display.blit(self.image, self.rect)
+
+
+# page for game menu
+class GameMenuPage(pygame.sprite.Sprite):
+    def __init__(self, id, options, original_pos, target_pos):
+        pygame.sprite.Sprite.__init__(self)
+
+        self.id = id
+        self.options = options
+        self.padding = 10
+
+        self.original_pos = original_pos
+        self.target_pos = target_pos
+
+        self.x = DISPLAY_WIDTH + 10
+        self.y = HALF_DISPLAY_HEIGHT
+        self.height = 380
+        self.width = int(self.height * 4 // 3)
+
+        self.image = pygame.Surface((self.width * 2, self.height // 2 + 40)).convert()
+        self.image.fill((60 + (5*self.id), 60 + (5*self.id), 60 + (5*self.id)))
+        self.image.set_colorkey(BLACK)
+        pygame.draw.polygon(self.image, BLACK, [[0, 0], [70, 0], [0, self.height // 2 - 30]])
+
+        self.rect = self.image.get_rect()
+        self.rect.topleft = (self.original_pos[0], self.original_pos[1] + (self.padding*self.id))
+        self.rect = pygame.FRect(self.rect)
+
+        self.shadow_surf = pygame.Surface((self.width * 2, self.height // 2 + 40)).convert()
+        self.shadow_surf.fill((30, 30, 30))
+        self.shadow_surf.set_colorkey(BLACK)
+        pygame.draw.polygon(self.shadow_surf, BLACK, [[0, 0], [70, 0], [0, self.height // 2 - 30]])
+
+        self.shadow_rect = self.shadow_surf.get_rect()
+        self.shadow_rect.topleft = (self.rect.left, self.rect.top + 4)
+
+
+        self.ui_group = pygame.sprite.Group()
+
+        for index, option, action in list(options):
+            UiElement(option, self.rect.x, self.rect.centery - 75 + (index * 70),
+                      index, 0, size=14, group=self.ui_group, func=action)
+
+        self.um = UiManager(self.ui_group)
+
+        self.toggled = False
+
+    def toggle(self, state):
+        if state == 1:
+            self.um.active = True
+            self.toggled = True
+        elif state == 0:
+            self.um.reset()
+            self.um.active = False
+            self.toggled = False
+
+    def update(self, dt, target_x_pos):
+        if self.toggled:
+            target_x = target_x_pos + (self.padding*self.id)
+
+            if self.id != 0:
+                diff = (target_x - self.rect.x)
+                if int(diff):
+                    self.rect.x += diff * 0.2 * dt
+                else:
+                    self.rect.x = target_x
+
+            else:
+                self.rect.x = target_x
+            self.shadow_rect.x = self.rect.x + 4
+
+        else:
+            diff = (self.original_pos[0] - self.rect.x)
+            if int(diff):
+                self.rect.x += diff * 0.15 * dt
+            else:
+                self.rect.x = self.original_pos[0]
+            self.shadow_rect.x = self.rect.x + 4
+        for index, ui in enumerate(self.um.ui_group):
+            ui.rect.x = self.rect.x + 120 - (index * 30)
+
+        self.um.update(dt)
+
+    def draw(self, display):
+        display.blit(self.shadow_surf, self.shadow_rect)
+        display.blit(self.image, self.rect)
+
+        self.um.draw(display)
 
 
 # game menu
@@ -243,22 +332,7 @@ class GameMenu(pygame.sprite.Sprite):
         self.y = HALF_DISPLAY_HEIGHT
         self.main_rect = self.image.get_rect()
         self.main_rect.midleft = (self.x, self.y)
-
-        self.page_image = pygame.Surface((self.width * 2, self.height // 2 + 40)).convert()
-        self.page_image.fill((60, 60, 60))
-        self.page_image.set_colorkey(BLACK)
-        pygame.draw.polygon(self.page_image, BLACK, [[0, 0], [70, 0], [0, self.height // 2 - 30]])
-
-        self.page_rect = self.page_image.get_rect()
-        self.page_rect.topleft = (self.main_rect.x + 40, self.main_rect.y + self.height // 2 + 40)
-
-        self.page_shadow = pygame.Surface((self.width * 2, self.height // 2 + 40)).convert()
-        self.page_shadow.fill((30, 30, 30))
-        self.page_shadow.set_colorkey(BLACK)
-        pygame.draw.polygon(self.page_shadow, BLACK, [[0, 0], [70, 0], [0, self.height // 2 - 30]])
-
-        self.page_shadow_rect = self.page_shadow.get_rect()
-        self.page_shadow_rect.topleft = self.page_rect.topleft
+        self.main_rect = pygame.FRect(self.main_rect)
 
         self.game = None
         self.label = Text("", 0, 0, WHITE, 0)
@@ -272,16 +346,21 @@ class GameMenu(pygame.sprite.Sprite):
 
         self.am = am
 
-        self.ui_group = pygame.sprite.Group()
-        self.options = {"Start Game":start_game_action, "Settings":None, "Back": self.toggle}
-        self.all_option_data = zip(range(len(self.options)), self.options.keys(), self.options.values())
+        self.pages = []
 
-        for index, option, action in list(self.all_option_data):
-            UiElement(option, self.page_rect.x, self.page_rect.y - 65 + (index * 70),
-                      index, 0, size=14, group=self.ui_group, func=action)
+        options = {"Start Game":start_game_action, "Settings":lambda: self.toggle_page_up(1), "Back":self.toggle}
+        self._setup_page(0, options)
 
-        self.um = UiManager(self.ui_group)
-        self.start_game_ui = self.um.get_ui(0, 0)
+        self.dialog = None
+        options = {"Uninstall":self.ask_uninstall, "Remove":self.ask_remove_from_device, "Back":lambda: self.toggle_page_down(0)}
+        self._setup_page(1, options)
+
+        self.current_page = 0
+
+        self.active_ums = [page.um for page in self.pages if page.um.active]
+        self.um = self.pages[self.current_page].um
+
+        self.start_game_ui = self.pages[0].um.get_ui(0, 0)
         self.status = None
 
     def _get_label(self, game):
@@ -297,44 +376,6 @@ class GameMenu(pygame.sprite.Sprite):
 
         return Text(display_name, self.main_rect.x + 40, self.main_rect.top + 30, WHITE, temp_size)
 
-    def update(self, dt):
-        diff = (self.target_scroll[0] - self.scroll[0])
-        if abs(diff) > 1:
-            self.scroll[0] += diff * 0.15 * dt
-        else:
-            self.scroll[0] = self.target_scroll[0]
-
-        self.main_rect.x = self.x + self.scroll[0]
-        self.main_rect.centery = self.y + self.scroll[1]
-
-        self.page_rect.x = self.main_rect.x + 80 + self.scroll[0] // 3
-        self.page_rect.y = self.main_rect.y + self.height // 3
-
-        self.page_shadow_rect.x = self.main_rect.x + 84 + self.scroll[0] // 3
-        self.page_shadow_rect.y = self.main_rect.y + 4 + self.height // 3
-
-        for index, ui in enumerate(self.um.ui_group):
-            ui.rect.x = self.page_rect.x + 120 - (index * 30)
-
-        self.um.update(dt)
-
-        self.label.rect.topleft = (self.main_rect.x + 35, self.main_rect.top + 30)
-
-    def toggle(self):
-        self.toggled = not self.toggled
-        if self.toggled:
-            self.am.play_sound("menu_up")
-            self.label = self._get_label(self.game)
-            self.um.x_index = 0
-            self.um.y_index = 0
-
-            status = self._get_status()
-            self.update_start_game_ui(status)
-
-        else:
-            self.am.play_sound("menu_down")
-        self.target_scroll[0] = self.x_scroll_bounds[self.toggled]
-
     def _get_status(self):
         status = None
         if self.game.installed:
@@ -345,45 +386,125 @@ class GameMenu(pygame.sprite.Sprite):
             status = 2
         return status
 
+    def _setup_page(self, id, options):
+        original_pos = (self.main_rect.x + 40, self.main_rect.y + self.height // 3)
+        target_pos = (self.x + self.x_scroll_bounds[0] + 80 + self.x_scroll_bounds[1] // 3, self.main_rect.y + self.height // 3)
+        all_option_data = zip(range(len(options)), options.keys(), options.values())
+        self.pages.append(GameMenuPage(id, all_option_data, original_pos, target_pos))
+
+    def update(self, dt):
+        diff = (self.target_scroll[0] - self.scroll[0])
+        if abs(diff) > 1:
+            self.scroll[0] += diff * 0.15 * dt
+        else:
+            self.scroll[0] = self.target_scroll[0]
+
+        self.main_rect.x = self.x + self.scroll[0]
+        self.main_rect.centery = self.y + self.scroll[1]
+
+        for page in self.pages:
+            page.update(dt, self.main_rect.x + 80 + self.scroll[0] // 3)
+
+        self.active_ums = [page.um for page in self.pages if page.toggled]
+        self.um = self.active_ums[-1] if len(self.active_ums) else self.pages[0].um
+
+        self.label.rect.topleft = (self.main_rect.x + 35, self.main_rect.top + 30)
+
+    def toggle(self):
+        self.toggled = not self.toggled
+        if self.toggled:
+            self.am.play_sound("menu_up")
+            self.label = self._get_label(self.game)
+            self.pages[0].toggle(1)
+            self.um.reset()
+
+            status = self._get_status()
+            self.update_start_game_ui(status)
+
+        else:
+            self.am.play_sound("menu_down")
+            for page in self.pages:
+                page.toggle(0)
+
+        self.target_scroll[0] = self.x_scroll_bounds[self.toggled]
+
+    def toggle_page_up(self, id):
+        all_ids = [page.id for page in self.pages]
+
+        # if id exists
+        if id in all_ids:
+            # make old page inactive
+            self.pages[self.current_page].um.active = False
+
+            # toggle new page
+            target_page = [page for page in self.pages if page.id == id][0]
+            target_page.toggle(1)
+
+            # new current page
+            self.current_page = id
+
+    def toggle_page_down(self, id):
+        all_ids = [page.id for page in self.pages]
+
+        # if id exists
+        if id in all_ids:
+            # make new page inactive
+            self.pages[self.current_page].toggle(0)
+
+            target_pages = [page for page in self.pages if page.id > id]
+            for page in target_pages:
+                page.toggle(0)
+
+            target_page = [page for page in self.pages if page.id == id][0]
+            target_page.um.active = True
+
+            # new current page
+            self.current_page = id
+
     def update_start_game_ui(self, status):
         if self.status != status:
             # already playable
             if status == 0:
                 self.start_game_ui.available = True
                 self.start_game_ui.change_label("Start Game", default_font)
-                self.start_game_ui.rect.x = self.page_rect.x + 120
-                self.um.update(1)
+                self.start_game_ui.rect.x = self.pages[0].rect.x + 120
+                self.pages[0].um.update(1)
 
             # not installed, but not installing either
             elif status == 1:
                 self.start_game_ui.available = True
                 self.start_game_ui.change_label("Install Game", default_font)
-                self.start_game_ui.rect.x = self.page_rect.x + 120
-                self.um.update(1)
+                self.start_game_ui.rect.x = self.pages[0].rect.x + 120
+                self.pages[0].um.update(1)
 
             # not installed, but already installing
             elif status == 2:
                 self.start_game_ui.available = False
-                self.um.update(1)
+                self.pages[0].um.update(1)
 
             self.status = status
+
+    def set_dialog(self, dialog):
+        self.dialog = dialog
+
+    def ask_remove_from_device(self):
+        self.dialog.reset(f"Remove {self.game.name} from device?\n\n^(this cannot be undone)^", has_ui=True, options=["Remove", "Cancel"], dialog_type=2)
+
+    def ask_uninstall(self):
+        self.dialog.reset(f"Uninstall {self.game.name} from device?\n\n^(can be re-installed later)^", has_ui=True, options=["Uninstall", "Cancel"], dialog_type=1)
 
     def action(self):
         if self.um.active:
             ui = self.um.action()
-            toggled = False
-            if ui.row == 2:
-                toggled = True
-            return toggled
+            return not self.toggled
 
     def draw(self, display):
         display.blit(self.image, self.main_rect)
-        display.blit(self.page_shadow, self.page_shadow_rect)
-        display.blit(self.page_image, self.page_rect)
+
+        for page in self.pages:
+            page.draw(display)
 
         self.label.draw(display)
-
-        self.um.draw(display)
 
 
 # game object
@@ -653,7 +774,7 @@ class GameManager:
                 # check if configurations are custom
                 for k, v in DEFAULT_GAME_CONFIG.items():
                     if k != "name":
-                        if config_data[k] != v:
+                        if config_data.get(k) != v:
                             is_config = True
 
                 # set necessary configurations
@@ -687,6 +808,7 @@ class GameManager:
             self.log_data.append(f"|  {d}^{is_valid} +{is_config}  +" + (" " if is_config else "") + f"{is_installed}" + (" " if is_installed else "") + "      |")
 
         # save all game configurations
+        self.dm.update("num_games", len(self.all_games_data))
         self.dm.update("loaded_games", self.all_games_data)
 
         # generate summary table in logging
@@ -731,28 +853,13 @@ class GameWheelUi(UiElement):
         self.bottom_angle = math.radians(90)
         self.lowest_game = None
 
-        # get games' data
-        self.all_games_data = games
-
-        # all games
-        self.games = []
-        self.sort_types = ["name", "size", "last_played_raw"]
-        self.sort_names = {"name":"Name", "size":"Size", "last_played_raw":"Last Played"}
-        self.reverse_sort = False
-
-        # get angles for even spacing
-        self.item_angle = 0
-        self.num_items = len(self.all_games_data)
-        self.angle_increment = 360 / self.num_items if self.num_items > 0 else 0
-
-        self.first_load = True
-        self.reload_games()
+        self.reset_games(games, 0)
 
         # scroll values
         self.scroll = [0, 0]
         self.target_scroll = [0, 0]
 
-        self.setup_ellipses()
+        self._setup_ellipses()
 
         self.game_label = Text(str(self.games[self.master_index].name), HALF_DISPLAY_WIDTH,
                                DISPLAY_HEIGHT - 13, WHITE, 12, centered=True)
@@ -776,7 +883,7 @@ class GameWheelUi(UiElement):
         self.sort_index = self.dm.data["sort"] - 0.5
         self.sort_games(None)
 
-    def setup_ellipses(self):
+    def _setup_ellipses(self):
         self.shadow_image = pygame.Surface(self.shadow_rect.size).convert_alpha()
         temp_rect = self.shadow_image.get_rect()
         self.shadow_image.set_colorkey(WHITE)
@@ -793,6 +900,29 @@ class GameWheelUi(UiElement):
         for i in range(60):
             temp_rect = (i*3, i, ellipse_rect.width - i*6, ellipse_rect.height - i*2)
             pygame.draw.ellipse(self.ellipse_image, (i + 70, i + 70, i + 70), temp_rect, 3)
+
+    def reset_games(self, games, master_index):
+        # all games
+        self.games = []
+        self.sort_types = ["name", "size", "last_played_raw"]
+        self.sort_names = {"name": "Name", "size": "Size", "last_played_raw": "Last Played"}
+        self.reverse_sort = False
+
+        # get games' data
+        self.all_games_data = games
+
+        # get angles for even spacing
+        self.item_angle = 0
+        self.num_items = len(self.all_games_data)
+        self.angle_increment = 360 / self.num_items if self.num_items > 0 else 0
+
+        self.first_load = True
+        self.reload_games()
+
+        self.master_index = master_index
+        self.target_index = master_index
+        self.master_angle = self.angle_increment * self.target_index
+        self.target_angle = self.angle_increment * self.target_index
 
     def reload_games(self):
         # reset angles and indices
@@ -897,7 +1027,7 @@ class GameWheelUi(UiElement):
     def update(self, dt, col, row):
         # check if selected
         self.check_selected(col, row, dt)
-        self.curtain.set_alpha(self.curtain_alpha)
+        self.curtain.set_alpha(int(self.curtain_alpha))
 
         self.update_scroll(self.selected, dt)
 
@@ -1060,6 +1190,8 @@ class ShugrPiOS:
         self.notification = Notification(None)
         self.linux.set_notification(self.notification)
 
+        self.game_menu.set_dialog(self.dialog_menu)
+
         # effects setup
         self.curtain = Curtain()
         self.curtain.set_color(DARKER_GRAY)
@@ -1099,7 +1231,7 @@ class ShugrPiOS:
     def setup_game_room(self):
         ui_group = pygame.sprite.Group()
 
-        if len(dm.data["loaded_games"]) == 0:
+        if dm.data["num_games"] != len(os.listdir(self.master_games_path)):
             all_games_data = self.gm.load_games(self.master_games_path)
         else:
             all_games_data = dm.data["loaded_games"]
@@ -1254,8 +1386,8 @@ class ShugrPiOS:
             if not self.will_shutdown:
                 if (self.dialog_menu.showing and self.dialog_menu.has_ui) or self.virtual_keyboard.toggled:
                     self.rm.current_room[2].active = False
-                    self.game_menu.um.active = False
                     self.game_wheel.selected[1] = False
+                    self.game_menu.um.active = False
                 else:
                     self.rm.current_room[2].active = True
                     self.game_menu.um.active = True
@@ -1517,6 +1649,7 @@ class ShugrPiOS:
         if audio_driver:
             pygame.mixer.unpause()
         self.am.play_music("shugrpi_bg")
+        self.game_menu.toggled = True
         self.game_menu.toggle()
 
         self.clock.tick(FPS)
@@ -1547,6 +1680,43 @@ class ShugrPiOS:
             else:
                 current_game = [g for g in self.game_wheel.games if g.name == installation.name][0]
                 current_game.update_during_install(installation.step)
+
+    def uninstall_game(self):
+        current_game = self.game_wheel.lowest_game
+        current_game_venv = os.path.join(current_game.root_path, ".venv")
+        if os.path.exists(current_game_venv):
+            rmtree(current_game_venv)
+            self.notification.reset(f"{current_game.name} has been uninstalled")
+
+            self.gm = GameManager(dm)
+            all_games_data = self.gm.load_games(self.master_games_path)
+            self.game_wheel.reset_games(all_games_data, self.game_wheel.master_index)
+
+            self.game_menu.update_start_game_ui(1)
+
+            self.clock.tick(FPS)
+
+        else:
+            if current_game.use_venv:
+                self.notification.reset(f"{current_game.name} is already not installed")
+            else:
+                self.notification.reset(f"{current_game.name} cannot be uninstalled")
+
+    def remove_game(self):
+        current_game = self.game_wheel.lowest_game
+        if os.path.exists(current_game.root_path):
+            rmtree(current_game.root_path)
+            self.notification.reset(f"{current_game.name} has been removed from device")
+
+            self.gm = GameManager(dm)
+            all_games_data = self.gm.load_games(self.master_games_path)
+            self.game_wheel.reset_games(all_games_data, 0)
+
+            self.game_menu.toggled = True
+            self.game_menu.toggle()
+            self.game_wheel.selected[0] = True
+
+            self.clock.tick(FPS)
 
     """ various utilities """
     def get_image(self, img):
@@ -1584,11 +1754,22 @@ class ShugrPiOS:
             self.switch_room("games")
 
     def handle_dialog_output(self):
+        # installation
         if self.dialog_menu.dialog_type == 0:
             if self.dialog_menu.choice == 1:
                 self.install_game()
             elif self.dialog_menu.choice == 0:
                 self.game_menu.update_start_game_ui(1)
+
+        # un-installation
+        if self.dialog_menu.dialog_type == 1:
+            if self.dialog_menu.choice == 1:
+                self.uninstall_game()
+
+        # game removal
+        if self.dialog_menu.dialog_type == 2:
+            if self.dialog_menu.choice == 1:
+                self.remove_game()
 
     def add_text_fields(self, d):
         for k, v in d.items():
@@ -1642,7 +1823,6 @@ class ShugrPiOS:
                 self.am.stop_music()
 
                 self.rm.current_room[2].active = False
-                self.game_menu.um.active = False
                 self.game_menu.toggled = True
                 self.game_menu.toggle()
                 self.game_wheel.selected = [True, False]

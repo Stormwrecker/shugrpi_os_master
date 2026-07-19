@@ -139,7 +139,7 @@ class VirtualKeyboard:
 
     def update(self, dt):
         self.button_manager.update(dt)
-        self.curtain.set_alpha(self.curtain_alpha)
+        self.curtain.set_alpha(int(self.curtain_alpha))
 
         if self.toggled:
             self.target_scroll = -225
