@@ -1696,6 +1696,8 @@ class ShugrPiOS:
 
             self.clock.tick(FPS)
 
+            logger.info(f"Uninstalled `{current_game.name}`")
+
         else:
             if current_game.use_venv:
                 self.notification.reset(f"{current_game.name} is already not installed")
@@ -1707,6 +1709,7 @@ class ShugrPiOS:
         if os.path.exists(current_game.root_path):
             rmtree(current_game.root_path)
             self.notification.reset(f"{current_game.name} has been removed from device")
+            logger.info(f"Removed `{current_game.name}` from device")
 
             self.gm = GameManager(dm)
             all_games_data = self.gm.load_games(self.master_games_path)
