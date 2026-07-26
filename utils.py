@@ -766,7 +766,7 @@ class UiManager:
 
     def action(self, play_sound=True):
         self.master_ui_dict[self.y_index][self.x_index].action()
-        if self.am and play_sound:
+        if self.am and play_sound and self.master_ui_dict[self.y_index][self.x_index].available:
             self.am.play_sound("action")
         return self.get_ui(self.x_index, self.y_index)
 

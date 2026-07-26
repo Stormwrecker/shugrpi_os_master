@@ -360,6 +360,8 @@ class GameMenu(pygame.sprite.Sprite):
         self.um = self.pages[self.current_page].um
 
         self.start_game_ui = self.pages[0].um.get_ui(0, 0)
+        self.uninstall_game_ui = self.pages[1].um.get_ui(0, 0)
+        self.remove_game_ui = self.pages[1].um.get_ui(0, 1)
         self.status = None
 
     def _get_label(self, game):
@@ -469,6 +471,9 @@ class GameMenu(pygame.sprite.Sprite):
                 self.start_game_ui.change_label("Start Game", default_font)
                 self.start_game_ui.rect.x = self.pages[0].rect.x + 120
                 self.pages[0].um.update(1)
+                self.uninstall_game_ui.available = True
+                self.remove_game_ui.available = True
+                self.pages[1].um.update(1)
 
             # not installed, but not installing either
             elif status == 1:
@@ -476,11 +481,17 @@ class GameMenu(pygame.sprite.Sprite):
                 self.start_game_ui.change_label("Install Game", default_font)
                 self.start_game_ui.rect.x = self.pages[0].rect.x + 120
                 self.pages[0].um.update(1)
+                self.uninstall_game_ui.available = True
+                self.remove_game_ui.available = True
+                self.pages[1].um.update(1)
 
             # not installed, but already installing
             elif status == 2:
                 self.start_game_ui.available = False
                 self.pages[0].um.update(1)
+                self.uninstall_game_ui.available = False
+                self.remove_game_ui.available = False
+                self.pages[1].um.update(1)
 
             self.status = status
 
@@ -853,6 +864,9 @@ class GameWheelUi(UiElement):
         self.bottom_angle = math.radians(90)
         self.lowest_game = None
 
+        self.sort_index = self.dm.data["sort"] - 0.5
+
+        self.first_load = True
         self.reset_games(games, 0)
 
         # scroll values
@@ -878,9 +892,6 @@ class GameWheelUi(UiElement):
 
         self.game_menu_toggled = False
 
-        self.first_sort = False
-        self.first_load = True
-        self.sort_index = self.dm.data["sort"] - 0.5
         self.sort_games(None)
 
     def _setup_ellipses(self):
@@ -916,22 +927,25 @@ class GameWheelUi(UiElement):
         self.num_items = len(self.all_games_data)
         self.angle_increment = 360 / self.num_items if self.num_items > 0 else 0
 
-        self.first_load = True
-        self.reload_games()
-
         self.master_index = master_index
         self.target_index = master_index
         self.master_angle = self.angle_increment * self.target_index
         self.target_angle = self.angle_increment * self.target_index
 
-    def reload_games(self):
-        # reset angles and indices
-        self.master_index = 0
-        self.target_index = 0
-        self.master_angle = 0
-        self.target_angle = 0
-        self.lowest_game = None
+        if str(self.sort_index).endswith(".5"):
+            self.reverse_sort = True
+        else:
+            self.reverse_sort = False
+        self.sort_index %= len(self.sort_types)
 
+        sort_key = self.sort_types[int(self.sort_index)]
+        games_data_copy = self.all_games_data.copy()
+        self.all_games_data = sorted(games_data_copy, key=lambda game: game[sort_key], reverse=self.reverse_sort)
+
+        self.first_load = True
+        self.reload_games()
+
+    def reload_games(self):
         # first time loading games
         if self.first_load:
             # add games to wheel
@@ -1666,7 +1680,7 @@ class ShugrPiOS:
 
             self.gm = GameManager(dm)
             all_games_data = self.gm.load_games(self.master_games_path)
-            self.game_wheel.reset_games(all_games_data, self.game_wheel.master_index)
+            self.game_wheel.reset_games(all_games_data, current_game.index)
 
             self.game_menu.update_start_game_ui(1)
 
