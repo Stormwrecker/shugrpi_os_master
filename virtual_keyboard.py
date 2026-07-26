@@ -11,7 +11,7 @@ from constants import *
 
 # virtual keyboard object
 class VirtualKeyboard:
-    def __init__(self):
+    def __init__(self, am):
         self.um = None
 
         self.text_field = None
@@ -28,7 +28,7 @@ class VirtualKeyboard:
         self.button_rects = []
         self.button_shadow_rects = []
         self._setup_buttons()
-        self.button_manager = UiManager(self.button_group, False)
+        self.button_manager = UiManager(self.button_group, False, am=am)
 
         self.image = pygame.Surface((self.width, self.height)).convert_alpha()
         self.image.set_colorkey(BLACK)

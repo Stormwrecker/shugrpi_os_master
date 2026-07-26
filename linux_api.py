@@ -19,26 +19,26 @@ class Linux:
             self._notify(f"Set time to {time}")
         elif code > 0:
             self.logger.error(f"Failed to set the time: {error}")
-            self._notify(f"Failed to set the time: {error}")
+            self._notify(f"Failed to set the time: {error}", True)
         elif code == -1:
             self.logger.warning("Cannot set time on non-SHUGRPi device")
-            self._notify("Cannot set time on non-SHUGRPi device")
+            self._notify("Cannot set time on non-SHUGRPi device", True)
         return code
 
     """network commands"""
     def connect_wifi(self, ssid, psk_key):
         if not len(ssid):
-            self._notify(f"`SSID` field cannot be empty")
+            self._notify(f"`SSID` field cannot be empty", True)
             return -1
 
         if not len(psk_key):
-            self._notify(f"`Password` field cannot be empty")
+            self._notify(f"`Password` field cannot be empty", True)
             return -1
 
         self.logger.info(f"Attempting a connection to `{ssid}`...")
         if not self.is_shugrpi:
             self.logger.warning(f"Non-SHUGRPi device cannot connect to `{ssid}`")
-            self._notify(f"Non-SHUGRPi device cannot connect to `{ssid}`")
+            self._notify(f"Non-SHUGRPi device cannot connect to `{ssid}`", True)
             return -1
 
         con_name = "shugrpi-wifi"
@@ -53,7 +53,7 @@ class Linux:
             return 0
         else:
             self.logger.error(f"Failed to connect to `{ssid}` using the password '{len(psk_key) * '*'}'")
-            self._notify(f"Failed to connect to `{ssid}`")
+            self._notify(f"Failed to connect to `{ssid}`", True)
             return 1
 
     def reload_wifi(self, ssid, psk_key):
@@ -123,8 +123,8 @@ class Linux:
         return -1, None
 
     """notify"""
-    def _notify(self, msg):
-        self.notification.reset(msg)
+    def _notify(self, msg, error=False):
+        self.notification.reset(msg, error)
 
 
 """unused code"""

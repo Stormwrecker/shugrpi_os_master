@@ -89,8 +89,9 @@ class AudioManager:
         try:
             self._load_sounds()
             self._load_musics()
-        except:
+        except Exception as e:
             self.working = False
+            logger.error(f"AudioManager: fail ({e})")
 
     def _get_sound_path(self, path):
         return os.path.join(base_path, "audio", path + ".wav")
@@ -99,10 +100,13 @@ class AudioManager:
         return os.path.join(base_path, "audio", path + ".mp3")
 
     def _load_sounds(self):
-        self.master_sounds["logo"] = [pygame.mixer.Sound(self._get_sound_path("shugrpi_alt")), .75, False]
+        self.master_sounds["logo"] = [pygame.mixer.Sound(self._get_sound_path("shugrpi_logo")), .5, False]
         self.master_sounds["menu_swish"] = [pygame.mixer.Sound(self._get_sound_path("menu_swish")), .2, False]
         self.master_sounds["menu_up"] = [pygame.mixer.Sound(self._get_sound_path("menu_up")), .2, False]
         self.master_sounds["menu_down"] = [pygame.mixer.Sound(self._get_sound_path("menu_down")), .2, False]
+        self.master_sounds["switch"] = [pygame.mixer.Sound(self._get_sound_path("switch")), .3, False]
+        self.master_sounds["action"] = [pygame.mixer.Sound(self._get_sound_path("action")), .4, False]
+        self.master_sounds["error"] = [pygame.mixer.Sound(self._get_sound_path("error")), .6, False]
 
     def _load_musics(self):
         self.master_music_tracks["shugrpi_bg"] = [self._get_music_path("shugrpi_bg"), .2]
@@ -203,7 +207,7 @@ class NetworkManager:
 
     def _check_internet_access(self):
         if self.linux.ping() == 0:
-            self.logger.info("SHUGRPi has access to the internet")
+            # self.logger.info("SHUGRPi has access to the internet")
             return True
         else:
             if not self.logged:
@@ -287,17 +291,112 @@ class DataManager:
         else:
             with open(self.save_file, "r") as f:
                 data = json.load(f)
-            self.logger.info(f"DataManager: load {[f"{k}: {v}" if k != "loaded_games" else f"{k}: {str(v)[:21] + '...' + str(v)[-2:]}" for k, v in data.items()]}")
+            self.logger.info("DataManager: load")
             return data
 
     def save(self):
         with open(self.save_file, "w") as f:
             f.write(json.dumps(self.data, indent=4))
-        self.logger.info(f"DataManager: save {[f"{k}: {v}" if k != "loaded_games" else f"{k}: {str(v)[:21] + '...' + str(v)[-2:]}" for k, v in self.data.items()]}")
+        self.logger.info("DataManager: save")
 
     def update(self, k, v):
         if k in self.data:
             self.data[k] = v
+
+
+# clock management
+class ClockManager:
+    def __init__(self, linux, dm, logger):
+        self.linux = linux
+        self.dm = dm
+        self.logger = logger
+
+        self.current_time = time.localtime(self.dm.data["last_timestamp"])
+        self.hour = self.current_time.tm_hour
+        self.minute = self.current_time.tm_min
+        self.round_clock = self.dm.data["round_clock"]
+
+        self.round_clock_labels = ["24 Hour disabled", "24 hour enabled"]
+
+        self.logger.info(f"Startup time: {time.strftime("%m-%d-%Y %I:%M %p", self.current_time)}")
+
+        self.ui_group = pygame.sprite.Group()
+        self.um = None
+
+    def set_um(self, um):
+        self.um = um
+
+    def setup_ui(self):
+        self.main_header_text = Text("Clock Settings", HALF_DISPLAY_WIDTH, 85, WHITE, 25, default_font, centered=True)
+
+        self.set_time_ui = UiElement("Set Time", HALF_DISPLAY_WIDTH, HALF_DISPLAY_HEIGHT, 0, 0, size=10, font=default_font, group=self.ui_group, func=self.set_time)
+
+        timer_pos_x = HALF_DISPLAY_WIDTH
+        timer_pos_y = HALF_DISPLAY_HEIGHT - 50
+        timer_size = 20
+        self.hour_ui = UiElement(self.hour, timer_pos_x - (timer_size*1.5), timer_pos_y, 0, 1, size=timer_size, font=default_font, group=self.ui_group, func=lambda: self.um.change_col(1))
+        self.minute_ui = UiElement(self.minute, timer_pos_x + (timer_size*2), timer_pos_y, 0, 2, size=timer_size, font=default_font, group=self.ui_group, func=lambda: self.um.change_col(1))
+        self.colon = Text(":", timer_pos_x, timer_pos_y, WHITE, timer_size, retro_font)
+
+        self.round_clock_ui = UiElement(self.round_clock_labels[int(self.round_clock)], HALF_DISPLAY_WIDTH, HALF_DISPLAY_HEIGHT + 50, 1, 0, size=10, font=default_font, group=self.ui_group, func=self.toggle_round_clock)
+
+    def set_time(self):
+        self.linux.set_time(time.strftime("%Y-%m-%d") + " " + str(self.hour_ui.label + ":" + self.minute_ui.label) + ":00")
+
+    def toggle_round_clock(self):
+        self.round_clock = not self.round_clock
+        if not self.round_clock:
+            if int(self.hour_ui.label) > 12:
+                label = str(int(self.hour_ui.label) % 12)
+                self.hour_ui.change_label(("0" if int(label) < 10 else "") + label, default_font)
+            elif int(self.hour_ui.label) < 1:
+                label = "12"
+                self.hour_ui.change_label(("0" if int(label) < 10 else "") + label, default_font)
+
+        self.round_clock_ui.change_label(self.round_clock_labels[self.round_clock], default_font)
+
+        self.dm.update("round_clock", self.round_clock)
+
+    def update_time(self):
+        self.current_time = time.strftime("%H:%M") if self.round_clock else time.strftime("%I:%M")
+
+    def events(self, event):
+        if self.hour_ui.selected:
+            if event.key == pygame.K_UP:
+                if self.round_clock:
+                    label = (int(self.hour_ui.label) + 1) % 24
+                else:
+                    label = int(self.hour_ui.label) + 1
+                    if label > 12:
+                        label = 1
+                self.hour_ui.change_label(("0" if label < 10 else "") + str(label), default_font)
+            if event.key == pygame.K_DOWN:
+                if self.round_clock:
+                    label = (int(self.hour_ui.label) - 1) % 24
+                else:
+                    label = int(self.hour_ui.label) - 1
+                    if label < 1:
+                        label = 12
+                self.hour_ui.change_label(("0" if label < 10 else "") + str(label), default_font)
+            return True
+        elif self.minute_ui.selected:
+            if event.key == pygame.K_UP:
+                label = str((int(self.minute_ui.label) + 1) % 60)
+                self.minute_ui.change_label(("0" if int(label) < 10 else "") + label, default_font)
+            if event.key == pygame.K_DOWN:
+                label = str((int(self.minute_ui.label) - 1) % 60)
+                self.minute_ui.change_label(("0" if int(label) < 10 else "") + label, default_font)
+            return True
+
+        return False
+
+    def update(self):
+        self.hour_ui.change_label(self.current_time.split(":")[0], default_font)
+        self.minute_ui.change_label(self.current_time.split(":")[1], default_font)
+
+    def draw(self, display):
+        self.main_header_text.draw(display)
+        self.colon.draw(display)
 
 
 """ Image Utilities """
@@ -598,7 +697,7 @@ class UiElement(pygame.sprite.Sprite):
 
 # UI Manager
 class UiManager:
-    def __init__(self, ui_group, col_reset=True):
+    def __init__(self, ui_group, col_reset=True, am=None):
         """
         Manager for navigating in-game UI with keyboard input
 
@@ -621,8 +720,13 @@ class UiManager:
         self.y_index = 0
 
         self.col_reset = col_reset
+        self.am = am
 
         self.active = True
+
+    def _play_sound(self):
+        if self.am:
+            self.am.play_sound("switch")
 
     def update(self, dt):
         if self.active:
@@ -639,6 +743,8 @@ class UiManager:
         if self.active:
             self.x_index += val
             self.x_index %= len(self.master_ui_dict[self.y_index])
+            self._play_sound()
+
 
     def change_row(self, val):
         if self.active:
@@ -649,6 +755,7 @@ class UiManager:
             else:
                 if len(self.master_ui_dict[self.y_index]) <= self.x_index:
                     self.x_index = len(self.master_ui_dict[self.y_index]) - 1
+            self._play_sound()
 
     def reset(self):
         self.x_index = 0
@@ -657,8 +764,10 @@ class UiManager:
     def get_ui(self, x, y):
         return self.master_ui_dict[y][x]
 
-    def action(self):
+    def action(self, play_sound=True):
         self.master_ui_dict[self.y_index][self.x_index].action()
+        if self.am and play_sound:
+            self.am.play_sound("action")
         return self.get_ui(self.x_index, self.y_index)
 
     def draw(self, display):
@@ -668,7 +777,8 @@ class UiManager:
 
 # notification object
 class Notification:
-    def __init__(self, msg):
+    def __init__(self, msg, am):
+        self.am = am
         self.reset(msg)
 
     def update(self, dt):
@@ -678,7 +788,7 @@ class Notification:
 
         self.text.update()
 
-    def reset(self, msg=None):
+    def reset(self, msg=None, error=False):
         self.msg = str(msg)
         self.size = 9
         self.x = DISPLAY_WIDTH - 20
@@ -694,6 +804,9 @@ class Notification:
         self.alpha = 255 if msg is not None else 0
         self.display_timer = Timer(240)
 
+        if error:
+            self.am.play_sound("error")
+
         self.surf.set_alpha(self.alpha)
 
     def draw(self, display):
@@ -704,7 +817,7 @@ class Notification:
 
 # dialog menu
 class DialogMenu:
-    def __init__(self, screen, msg, instant=False, has_ui=False, options=["OK"]):
+    def __init__(self, screen, msg, instant=False, has_ui=False, options=["OK"], am=None):
         self.width = 500
         self.height = 250
 
@@ -734,9 +847,11 @@ class DialogMenu:
         self.curtain.set_alpha(self.curtain_alpha)
         self.curtain_fade_speed = 10
 
+        self.am = am
+
         self.reset(msg, instant, has_ui, options)
 
-    def reset(self, msg, instant=False, has_ui=False, options=["OK"], dialog_type=None):
+    def reset(self, msg, instant=False, has_ui=False, options=["OK"], dialog_type=None, error=False):
         self.msg = msg
         self.dialog_type = dialog_type
 
@@ -775,7 +890,7 @@ class DialogMenu:
                 elif opt in ["Yes", "Install", "Uninstall", "Remove"]:
                     ok_btn = UiElement(opt, self.rect.width // 2 - 100, self.rect.height - 50, 0, 1, 20, font=retro_font, group=self.ui_group,
                                        func=self.fade_out)
-            self.um = UiManager(self.ui_group)
+            self.um = UiManager(self.ui_group, am=self.am)
 
         self.small_msg = []
         if self.msg is not None:
@@ -843,6 +958,9 @@ class DialogMenu:
 
         self.surf.set_alpha(self.alpha)
         self.curtain.set_alpha(self.curtain_alpha)
+
+        if error:
+            self.am.play_sound("error")
 
     def update(self, dt):
         self.surf.set_alpha(int(self.alpha))
@@ -1069,25 +1187,6 @@ class RoomManager:
             room[0].draw(display)
 
 
-""" Clock Utilities """
-
-class SystemClock:
-    def __init__(self, linux, current_time):
-        self.linux = linux
-        self.current_time = current_time
-        self.hour = self.current_time.split(":")[0]
-        self.minute = self.current_time.split(":")[1]
-
-        self.round_clock = False
-        self.round_clock_labels = ["12-hour format", "24-hour format"]
-
-    def set_time(self, t):
-        self.linux.set_time(time.strftime("%Y-%m-%d") + " " + str(t) + ":00")
-
-    def switch_format(self):
-        self.round_clock = not self.round_clock
-
-
 __all__ = ["init_logger",
            "quit_logger",
            "CompatibilityManager",
@@ -1112,4 +1211,4 @@ __all__ = ["init_logger",
            "DialogMenu",
            "Room",
            "RoomManager",
-           "SystemClock"]
+           "ClockManager"]

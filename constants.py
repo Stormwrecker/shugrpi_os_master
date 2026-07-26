@@ -57,14 +57,17 @@ SHUGRPi OS save data
 
 -- Values --
 ``sort`` is how games were last sorted in the UI
+``num_games`` is how many games are in the cache
 ``loaded_games`` is all the games and whether they are installed or not
 ``last_timestamp`` is the time when the SHUGRPi last shut off
+``round_clock`` is whether 24-hour clock is enabled or not
 ``network`` is the network that was last connected to
 """
 DEFAULT_SAVE = {"sort":0.0,
                 "num_games":0,
                 "loaded_games":[],
                 "last_timestamp":None,
+                "round_clock":True,
                 "network":{"ssid":None, "psk-key":None}}
 
 # messages
@@ -87,3 +90,31 @@ INPUT_BINDINGS = {"UP":    [K_UP, HAT_UP, CONTROLLER_BUTTON_DPAD_UP],
                   "SELECT":[K_RSHIFT, CONTROLLER_AXIS_TRIGGERLEFT],
                   "START": [K_RETURN, CONTROLLER_BUTTON_START],
                   "POWER": [K_ESCAPE, CONTROLLER_AXIS_TRIGGERRIGHT]}
+
+
+__all__ = ["VERSION",
+           "FPS",
+           "SPEED",
+           "WHITE",
+           "BLACK",
+           "RED",
+           "ORANGE",
+           "YELLOW",
+           "GREEN",
+           "BLUE",
+           "GRAY",
+           "DARK_GRAY",
+           "DARKER_GRAY",
+           "DARK_BLUE",
+           "DISPLAY_WIDTH",
+           "DISPLAY_HEIGHT",
+           "SCREEN_WIDTH",
+           "SCREEN_HEIGHT",
+           "HALF_DISPLAY_WIDTH",
+           "HALF_DISPLAY_HEIGHT",
+           "GAME_PATH",
+           "DEFAULT_GAME_CONFIG",
+           "DEFAULT_SAVE",
+           "WELCOME_MSG",
+           "INSTALLATION_MSG",
+           "INPUT_BINDINGS"]
