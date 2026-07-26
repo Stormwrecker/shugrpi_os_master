@@ -48,6 +48,7 @@ import time
 import json
 import math
 import random
+import threading
 from shutil import copy, rmtree
 
 
@@ -1672,27 +1673,28 @@ class ShugrPiOS:
                 current_game.update_during_install(installation.step)
 
     def uninstall_game(self):
-        current_game = self.game_wheel.lowest_game
-        current_game_venv = os.path.join(current_game.root_path, ".venv")
-        if os.path.exists(current_game_venv):
-            rmtree(current_game_venv)
-            self.notification.reset(f"{current_game.name} has been uninstalled")
+        with threading.Lock():
+            current_game = self.game_wheel.lowest_game
+            current_game_venv = os.path.join(current_game.root_path, ".venv")
+            if os.path.exists(current_game_venv):
+                rmtree(current_game_venv)
+                self.notification.reset(f"{current_game.name} has been uninstalled")
 
-            self.gm = GameManager(dm)
-            all_games_data = self.gm.load_games(self.master_games_path)
-            self.game_wheel.reset_games(all_games_data, current_game.index)
+                self.gm = GameManager(dm)
+                all_games_data = self.gm.load_games(self.master_games_path)
+                self.game_wheel.reset_games(all_games_data, current_game.index)
 
-            self.game_menu.update_start_game_ui(1)
+                self.game_menu.update_start_game_ui(1)
 
-            self.clock.tick(FPS)
+                self.clock.tick(FPS)
 
-            logger.info(f"Uninstalled `{current_game.name}`")
+                logger.info(f"Uninstalled `{current_game.name}`")
 
-        else:
-            if current_game.use_venv:
-                self.notification.reset(f"{current_game.name} is already not installed", True)
             else:
-                self.notification.reset(f"{current_game.name} cannot be uninstalled", True)
+                if current_game.use_venv:
+                    self.notification.reset(f"{current_game.name} is already not installed", True)
+                else:
+                    self.notification.reset(f"{current_game.name} cannot be uninstalled", True)
 
     def remove_game(self):
         current_game = self.game_wheel.lowest_game
@@ -1757,7 +1759,7 @@ class ShugrPiOS:
         # un-installation
         if self.dialog_menu.dialog_type == 1:
             if self.dialog_menu.choice == 1:
-                self.uninstall_game()
+                threading.Thread(target=self.uninstall_game).start()
 
         # game removal
         if self.dialog_menu.dialog_type == 2:

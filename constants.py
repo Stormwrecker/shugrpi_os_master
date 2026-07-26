@@ -75,23 +75,6 @@ WELCOME_MSG = "Welcome to the SHUGRPi!"
 INSTALLATION_MSG = " must be fully installed before playing. Continue? ^(this requires an internet connection)^"
 
 
-# get pygame for necessary values
-from pygame.locals import *
-
-# available inputs for the SHUGRPi
-INPUT_BINDINGS = {"UP":    [K_UP, HAT_UP, CONTROLLER_BUTTON_DPAD_UP],
-                  "DOWN":  [K_DOWN, HAT_DOWN, CONTROLLER_BUTTON_DPAD_DOWN],
-                  "LEFT":  [K_LEFT, HAT_LEFT, CONTROLLER_BUTTON_DPAD_LEFT],
-                  "RIGHT": [K_RIGHT, HAT_RIGHT, CONTROLLER_BUTTON_DPAD_RIGHT],
-                  "A":     [K_a, CONTROLLER_BUTTON_A],
-                  "B":     [K_b, CONTROLLER_BUTTON_B],
-                  "X":     [K_x, CONTROLLER_BUTTON_X],
-                  "Y":     [K_y, CONTROLLER_BUTTON_Y],
-                  "SELECT":[K_RSHIFT, CONTROLLER_AXIS_TRIGGERLEFT],
-                  "START": [K_RETURN, CONTROLLER_BUTTON_START],
-                  "POWER": [K_ESCAPE, CONTROLLER_AXIS_TRIGGERRIGHT]}
-
-
 __all__ = ["VERSION",
            "FPS",
            "SPEED",
@@ -116,5 +99,4 @@ __all__ = ["VERSION",
            "DEFAULT_GAME_CONFIG",
            "DEFAULT_SAVE",
            "WELCOME_MSG",
-           "INSTALLATION_MSG",
-           "INPUT_BINDINGS"]
+           "INSTALLATION_MSG"]
