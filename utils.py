@@ -1026,6 +1026,7 @@ class TextField(pygame.sprite.Sprite):
 
         self.selected = False
         self.true_selected = False
+        self.available = True
 
         self.max_chars = (w - self.size//2)//self.size
         self.scroll = 0
@@ -1117,12 +1118,14 @@ class Room:
         self.rect.topleft = (self.x * DISPLAY_WIDTH, self.y * DISPLAY_HEIGHT)
         self.rect = pygame.FRect(self.rect)
 
+        self.active = self.x == 0 and self.y == 0
         self.moving = False
 
     def move(self, dx=0, dy=0):
         self.x = dx
         self.y = dy
         self.moving = True
+        self.active = True
 
     def clear(self):
         self.surf.fill((0, 0, 0, 0))
@@ -1145,6 +1148,9 @@ class Room:
 
             if self.rect.x == actual_target_x and self.rect.y == actual_target_y:
                 self.moving = False
+        else:
+            if self.y != 0 or self.x != 0:
+                self.active = False
 
     def draw(self, display):
         display.blit(self.surf, self.rect)
@@ -1161,7 +1167,6 @@ class RoomManager:
 
     def switch_to(self, name):
         target_room = self.rooms[name]
-        self.active_rooms = [self.current_room[0], target_room[0]]
         target_room[2].reset()
         target_room[0].move(0, 0)
         if target_room[2] is not None:
@@ -1175,6 +1180,8 @@ class RoomManager:
         return self.current_room
 
     def update(self, dt):
+        self.active_rooms = [room[0] for room in self.rooms.values() if room[0].active]
+
         for _, room in self.rooms.items():
             room[0].update_pos(dt)
 
