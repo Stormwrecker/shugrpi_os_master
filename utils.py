@@ -1191,7 +1191,8 @@ class RoomManager:
 
     def draw(self, display):
         for _, room in self.rooms.items():
-            room[0].draw(display)
+            if room[0].active:
+                room[0].draw(display)
 
 
 __all__ = ["init_logger",

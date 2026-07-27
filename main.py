@@ -636,6 +636,15 @@ class Game(pygame.sprite.Sprite):
         if success:
             self.installed = True
 
+    def update_before_uninstall(self):
+        self.install_in_progress = True
+        msg = "Uninstalling..."
+        self.status_label.set_text(msg)
+        self.status_label.rect.center = self.rect.center
+
+    def update_after_uninstall(self):
+        self.install_in_progress = False
+
     def scale_image(self, selected, dt):
         current_width = self.image.get_width()
 
@@ -1557,9 +1566,14 @@ class ShugrPiOS:
                 if room[0] in self.rm.active_rooms:
                     room[2].draw(room[1])
 
-            self.game_menu.draw(self.rooms["games"][1])
-            self.cm.draw(self.rooms["clock"][1])
-            self.nm.draw(self.rooms["network"][1])
+            if self.rooms["games"][0].active:
+                self.game_menu.draw(self.rooms["games"][1])
+
+            if self.rooms["clock"][0].active:
+                self.cm.draw(self.rooms["clock"][1])
+
+            if self.rooms["network"][0].active:
+                self.nm.draw(self.rooms["network"][1])
 
             self.rm.draw(self.display)
 
@@ -1677,6 +1691,8 @@ class ShugrPiOS:
             current_game = self.game_wheel.lowest_game
             current_game_venv = os.path.join(current_game.root_path, ".venv")
             if os.path.exists(current_game_venv):
+                current_game.update_before_uninstall()
+
                 rmtree(current_game_venv)
                 self.notification.reset(f"{current_game.name} has been uninstalled")
 
@@ -1685,6 +1701,7 @@ class ShugrPiOS:
                 self.game_wheel.reset_games(all_games_data, current_game.index)
 
                 self.game_menu.update_start_game_ui(1)
+                current_game.update_after_uninstall()
 
                 self.clock.tick(FPS)
 
