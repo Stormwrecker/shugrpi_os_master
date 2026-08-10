@@ -1263,9 +1263,9 @@ class ShugrPiOS:
             all_games_data = dm.data["loaded_games"]
         self.game_wheel = GameWheelUi(HALF_DISPLAY_WIDTH, HALF_DISPLAY_HEIGHT + 60, 180, 60, all_games_data, ui_group, dm)
 
-        self.clock_ui = UiElement(self.cm.current_time, 30, 10, 0, 0, size=10, font=retro_font, group=ui_group, func= lambda: self.switch_room("clock"))
-        self.network_ui = UiElement("Wifi", DISPLAY_WIDTH - 100, 10, 0, 1, size=10, font=retro_font, group=ui_group, func= lambda: self.switch_room("network"))
-        self.power_ui = UiElement("Power", DISPLAY_WIDTH - 50, 10, 0, 2, size=10, font=retro_font, group=ui_group, func= lambda: self.switch_room("power"))
+        self.clock_ui = UiElement(self.cm.current_time, 30, 10, 0, 0, size=10, font=default_font, group=ui_group, func= lambda: self.switch_room("clock"))
+        self.network_ui = UiElement(pygame.transform.scale(self.get_image("wifi_on"), (30, 30)), DISPLAY_WIDTH - 75, 0, 0, 1, size=10, font=retro_font, group=ui_group, func= lambda: self.switch_room("network"))
+        self.power_ui = UiElement(pygame.transform.scale(self.get_image("battery"), (30, 30)), DISPLAY_WIDTH - 40, 0, 0, 2, size=10, font=retro_font, group=ui_group, func= lambda: self.switch_room("power"))
 
         self.game_menu = GameMenu(self.am, self.fade_to_game)
 
@@ -1276,7 +1276,7 @@ class ShugrPiOS:
         ui_group = pygame.sprite.Group()
 
         self.cm.setup_ui()
-        back_btn = self.add_back_button(self.cm.ui_group)
+        back_btn = self.add_back_button(self.cm.ui_group, 1)
 
         self.create_ui_manager("clock", self.cm.ui_group)
         self.cm.set_um(self.ui_managers["clock"])
@@ -1291,8 +1291,9 @@ class ShugrPiOS:
 
     def setup_power_room(self):
         ui_group = pygame.sprite.Group()
-        self.power_ui = UiElement("Power Off", 100, 100, 0, 0, size=10, font=retro_font, group=ui_group, func=lambda: self.pre_shutdown(0, True))
-        self.reboot_ui = UiElement("Reboot", 100, 200, 1, 0, size=10, font=retro_font, group=ui_group, func=self.linux.reboot)
+        self.power_header_text = Text("Power Settings", HALF_DISPLAY_WIDTH, 85, WHITE, size=25, font=default_font, centered=True)
+        self.power_ui = UiElement("Power Off", HALF_DISPLAY_WIDTH, 200, 0, 0, size=12, font=default_font, centered=True, group=ui_group, func=lambda: self.pre_shutdown(0, True))
+        self.reboot_ui = UiElement("Reboot", HALF_DISPLAY_WIDTH, 300, 1, 0, size=12, font=default_font, centered=True, group=ui_group, func=self.linux.reboot)
         back_btn = self.add_back_button(ui_group)
 
         self.create_ui_manager("power", ui_group)
@@ -1430,7 +1431,7 @@ class ShugrPiOS:
             if self.current_room[3] != "clock":
                 self.cm.update()
 
-            self.clock_ui.change_label(self.cm.current_time)
+            self.clock_ui.change_label(self.cm.current_time[1:] if not self.cm.round_clock else self.cm.current_time, default_font)
             self.fps_text.set_text(str(round(self.clock.get_fps())))
 
             if self.start_game:
@@ -1574,6 +1575,9 @@ class ShugrPiOS:
 
             if self.rooms["network"][0].active:
                 self.nm.draw(self.rooms["network"][1])
+
+            if self.rooms["power"][0].active:
+                self.power_header_text.draw(self.rooms["power"][1])
 
             self.rm.draw(self.display)
 

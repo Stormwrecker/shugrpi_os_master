@@ -225,9 +225,9 @@ class NetworkManager:
         self.main_header_text = Text("Network Settings", HALF_DISPLAY_WIDTH, 85, WHITE, 25, default_font, centered=True)
 
         self.wifi_header_text = Text("Network Status", 190, first_col_y - 50, WHITE, 15, default_font, True)
-        self.wifi_name_text = Text(f"Wifi Connection: {self.ssid}", first_col_x, first_col_y, WHITE, 11, retro_font, False)
-        self.status_text = Text(f"Status: {self.status}", first_col_x, first_col_y + 50, WHITE, 11, retro_font, False)
-        self.signal_text = Text(f"Signal Strength: {self.statuses[self.signal_strength]}", first_col_x, first_col_y + 100, WHITE, 11, retro_font, False)
+        self.wifi_name_text = Text(f"Wifi Connection: {self.ssid}", first_col_x, first_col_y, WHITE, 11, default_font, False)
+        self.status_text = Text(f"Status: {self.status}", first_col_x, first_col_y + 50, WHITE, 11, default_font, False)
+        self.signal_text = Text(f"Signal Strength: {self.statuses[self.signal_strength]}", first_col_x, first_col_y + 100, WHITE, 11, default_font, False)
 
         self.connect_header_text = Text("Wifi Setup", second_col_x + 50, first_col_y - 50, WHITE, 15, default_font, True)
 
@@ -239,6 +239,7 @@ class NetworkManager:
         self.connect_ui = UiElement("Connect", second_col_x + 35, second_col_y + 100, 2, 0, size=10, font=default_font, group=self.ui_group, func=lambda: self.connect_wifi(self.text_fields["ssid"], self.text_fields["psk_key"]))
 
     def connect_wifi(self, ssid, psk_key):
+        self.disconnect_wifi()
         if self.linux.connect_wifi(ssid.value, psk_key.value) == 0:
             self.dm.update("network", {"ssid":ssid.value, "psk-key":psk_key.value})
 
@@ -316,7 +317,7 @@ class ClockManager:
         self.minute = self.current_time.tm_min
         self.round_clock = self.dm.data["round_clock"]
 
-        self.round_clock_labels = ["24 Hour disabled", "24 hour enabled"]
+        self.round_clock_labels = ["Round Clock: ON", "Round Clock: OFF"]
 
         self.logger.info(f"Startup time: {time.strftime("%m-%d-%Y %I:%M %p", self.current_time)}")
 
@@ -328,17 +329,25 @@ class ClockManager:
 
     def setup_ui(self):
         self.main_header_text = Text("Clock Settings", HALF_DISPLAY_WIDTH, 85, WHITE, 25, default_font, centered=True)
+        first_col_x = HALF_DISPLAY_WIDTH - 260
+        first_col_y = 244
 
-        self.set_time_ui = UiElement("Set Time", HALF_DISPLAY_WIDTH, HALF_DISPLAY_HEIGHT, 0, 0, size=10, font=default_font, group=self.ui_group, func=self.set_time)
+        second_col_x = HALF_DISPLAY_WIDTH + 200
+        second_col_y = 244
 
-        timer_pos_x = HALF_DISPLAY_WIDTH
-        timer_pos_y = HALF_DISPLAY_HEIGHT - 50
-        timer_size = 20
-        self.hour_ui = UiElement(self.hour, timer_pos_x - (timer_size*1.5), timer_pos_y, 0, 1, size=timer_size, font=default_font, group=self.ui_group, func=lambda: self.um.change_col(1))
-        self.minute_ui = UiElement(self.minute, timer_pos_x + (timer_size*2), timer_pos_y, 0, 2, size=timer_size, font=default_font, group=self.ui_group, func=lambda: self.um.change_col(1))
-        self.colon = Text(":", timer_pos_x, timer_pos_y, WHITE, timer_size, retro_font)
+        self.set_time_text = Text("Set Time", 190, first_col_y - 50, WHITE, 16, default_font, centered=True)
+        self.extras_text = Text("Options", DISPLAY_WIDTH - 190, second_col_y - 50, WHITE, 16, default_font, centered=True)
 
-        self.round_clock_ui = UiElement(self.round_clock_labels[int(self.round_clock)], HALF_DISPLAY_WIDTH, HALF_DISPLAY_HEIGHT + 50, 1, 0, size=10, font=default_font, group=self.ui_group, func=self.toggle_round_clock)
+        timer_pos_x = first_col_x
+        timer_pos_y = first_col_y
+        timer_size = 14
+        self.hour_ui = UiElement(self.hour, timer_pos_x - (timer_size*1.5), timer_pos_y, 0, 2, size=timer_size, font=default_font, group=self.ui_group, func=lambda: self.um.change_col(1))
+        self.minute_ui = UiElement(self.minute, timer_pos_x + (timer_size*2), timer_pos_y, 0, 3, size=timer_size, font=default_font, group=self.ui_group, func=lambda: self.um.change_col(1))
+        self.colon = Text(":", first_col_x, timer_pos_y, WHITE, timer_size, retro_font)
+        self.set_time_ui = UiElement("Update", first_col_x + timer_size * 6, first_col_y, 0, 0, size=10, font=default_font, group=self.ui_group, func=self.set_time)
+
+
+        self.round_clock_ui = UiElement(self.round_clock_labels[int(self.round_clock)], second_col_x, second_col_y, 0, 1, size=10, font=default_font, group=self.ui_group, func=self.toggle_round_clock)
 
     def set_time(self):
         self.linux.set_time(time.strftime("%Y-%m-%d") + " " + str(self.hour_ui.label + ":" + self.minute_ui.label) + ":00")
@@ -396,6 +405,8 @@ class ClockManager:
 
     def draw(self, display):
         self.main_header_text.draw(display)
+        self.set_time_text.draw(display)
+        self.extras_text.draw(display)
         self.colon.draw(display)
 
 
@@ -465,11 +476,19 @@ def draw_text(display, text, x, y, color, size, font=default_font, centered=Fals
 class Text(pygame.sprite.Sprite):
     def __init__(self, text, x, y, color, size, font=default_font, centered=False):
         pygame.sprite.Sprite.__init__(self)
-        self.text = str(text)
-        self.color = color
+        self.original_text = str(text)
 
-        self.font = self._get_font(font, size)
-        self.image = self.font.render(self.text, False, self.color)
+        self.color = color
+        self.size = size
+
+        self.font_name = font
+        self.font = self._get_font(self.font_name, self.size)
+        self.alt_font = self._get_font(retro_font, self.size + 2)
+
+        self.text, self.alt_text = self._parse_text_by_font(self.original_text, self.font_name)
+
+        self.image = self._setup_image(self.text, self.alt_text)
+
         self.rect = self.image.get_rect()
         self.centered = centered
         self.x = x
@@ -481,9 +500,12 @@ class Text(pygame.sprite.Sprite):
             self.rect.topleft = (self.x, self.y)
 
     def set_text(self, new_text):
-        if self.text != str(new_text):
-            self.text = str(new_text)
-            self.image = self.font.render(self.text, False, self.color)
+        if self.original_text != str(new_text):
+            self.original_text = str(new_text)
+
+            self.text, self.alt_text = self._parse_text_by_font(self.original_text, self.font_name)
+
+            self.image = self._setup_image(self.text, self.alt_text)
             self.rect = self.image.get_rect()
             if self.centered:
                 self.rect.center = (self.x, self.y)
@@ -492,6 +514,38 @@ class Text(pygame.sprite.Sprite):
 
     def _get_font(self, font, size):
         return get_font(font, size)
+
+    def _parse_text_by_font(self, text, font):
+        new_text = ""
+        if font == default_font:
+            for t in text:
+                if not t.isalnum() and not t.isspace():
+                    i = text.find(t)
+                    text = text.split(t)
+                    text[0] += " "
+                    text[1] = "  " + text[1]
+                    new_text = t
+        return text, new_text
+
+    def _setup_image(self, text, alt_text=""):
+        if len(alt_text) == 0:
+            image = self.font.render(text, False, self.color)
+
+            return image
+        else:
+            self.font: pygame.font.Font
+            big_image = pygame.Surface(self.font.size(self.original_text)).convert()
+            big_image.set_colorkey(BLACK)
+
+            image = self.font.render(text[0], False, self.color)
+            new_image = self.alt_font.render(alt_text, False, self.color)
+
+            big_image.blit(new_image, (image.get_width() - self.size * .4, self.size * .4), special_flags=pygame.BLEND_RGBA_ADD)
+
+            image = self.font.render("".join(text), False, self.color)
+            big_image.blit(image, (0, 0), special_flags=pygame.BLEND_RGBA_ADD)
+
+            return big_image
 
     def draw(self, display):
         display.blit(self.image, self.rect)
@@ -744,7 +798,6 @@ class UiManager:
             self.x_index += val
             self.x_index %= len(self.master_ui_dict[self.y_index])
             self._play_sound()
-
 
     def change_row(self, val):
         if self.active:
