@@ -57,7 +57,7 @@ def init_pygame():
     os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
     pygame.init()
     logger.info("Initialized pygame-ce")
-    active_driver = None
+    active_driver = "dummy"
 
     # setup audio
     try:
@@ -78,7 +78,7 @@ def init_pygame():
                 logger.info(f"Trying audio driver: {active_driver}")
                 break
             except Exception as e:
-                active_driver = None
+                active_driver = "dummy"
                 logger.error(f"Driver not available: {driver}")
 
     if active_driver:
@@ -104,7 +104,7 @@ pygame.display.set_allow_screensaver(False)
 
 # load all images
 master_images = preload_images()
-pygame.display.set_icon(master_images["icon"])
+pygame.display.set_icon(master_images["app"])
 
 
 # screen-size curtain for transitions
@@ -1196,6 +1196,7 @@ class ShugrPiOS:
         self.setup_game_room()
         self.setup_clock_room()
         self.setup_network_room()
+        self.setup_wifi_list_room()
         self.setup_power_room()
 
         # universal UI setup
@@ -1224,10 +1225,13 @@ class ShugrPiOS:
         self.create_room("games", 0, 0, self.ui_managers["games"])
         self.create_room("clock", 0, -1, self.ui_managers["clock"])
         self.create_room("network", 0, -1, self.ui_managers["network"])
+        self.create_room("wifi_list", 1, -1, self.ui_managers["wifi_list"])
         self.create_room("power", 0, -1, self.ui_managers["power"])
 
         self.rm = RoomManager(self.rooms)
         self.current_room = self.rm.current_room
+
+        self.update_wifi_list_room()
 
         # installation setup
         self.installations = {}
@@ -1264,8 +1268,13 @@ class ShugrPiOS:
         self.game_wheel = GameWheelUi(HALF_DISPLAY_WIDTH, HALF_DISPLAY_HEIGHT + 60, 180, 60, all_games_data, ui_group, dm)
 
         self.clock_ui = UiElement(self.cm.current_time, 30, 10, 0, 0, size=10, font=default_font, group=ui_group, func= lambda: self.switch_room("clock"))
-        self.network_ui = UiElement(pygame.transform.scale(self.get_image("wifi_on"), (30, 30)), DISPLAY_WIDTH - 75, 0, 0, 1, size=10, font=retro_font, group=ui_group, func= lambda: self.switch_room("network"))
+
+        master_images["wifi_on"] = pygame.transform.scale(self.get_image("wifi_on"), (30, 30))
+        master_images["wifi_off"] = pygame.transform.scale(self.get_image("wifi_off"), (30, 30))
+        self.network_ui = UiElement(self.get_image("wifi_on"), DISPLAY_WIDTH - 75, 0, 0, 1, size=10, font=retro_font, group=ui_group, func= lambda: self.switch_room("network"))
         self.power_ui = UiElement(pygame.transform.scale(self.get_image("battery"), (30, 30)), DISPLAY_WIDTH - 40, 0, 0, 2, size=10, font=retro_font, group=ui_group, func= lambda: self.switch_room("power"))
+
+
 
         self.game_menu = GameMenu(self.am, self.fade_to_game)
 
@@ -1282,12 +1291,19 @@ class ShugrPiOS:
         self.cm.set_um(self.ui_managers["clock"])
 
     def setup_network_room(self):
-        self.nm.setup_ui(self.virtual_keyboard)
+        self.nm.setup_ui()
         self.add_text_fields(self.nm.text_fields)
 
-        back_btn = self.add_back_button(self.nm.ui_group, 3)
+        back_btn = self.add_back_button(self.nm.ui_group, 2)
 
         self.create_ui_manager("network", self.nm.ui_group)
+
+    def setup_wifi_list_room(self):
+        self.nm.setup_wifi_list_ui(master_images)
+        self.create_ui_manager("wifi_list", pygame.sprite.Group())
+
+    def update_wifi_list_room(self):
+        self.nm.wifi_list_ui.func = lambda: self.rm.switch_to("wifi_list")
 
     def setup_power_room(self):
         ui_group = pygame.sprite.Group()
@@ -1400,7 +1416,7 @@ class ShugrPiOS:
 
         # main menu
         elif self.master_phase == 0:
-            self.floating_logo.update(dt, self.current_room[3])
+            self.floating_logo.update(dt, self.current_room[0].name)
 
             self.dialog_menu.update(dt)
 
@@ -1424,14 +1440,15 @@ class ShugrPiOS:
 
             self.game_wheel.check_game_menu_toggled(self.game_menu.toggled)
 
-            self.nm.update()
+            self.nm.update(dt)
 
             self.notification.update(dt)
 
-            if self.current_room[3] != "clock":
+            if self.current_room[0].name != "clock":
                 self.cm.update()
 
             self.clock_ui.change_label(self.cm.current_time[1:] if not self.cm.round_clock else self.cm.current_time, default_font)
+            self.network_ui.change_label(self.get_image("wifi_on" if self.nm.internet_access else "wifi_off"))
             self.fps_text.set_text(str(round(self.clock.get_fps())))
 
             if self.start_game:
@@ -1444,7 +1461,7 @@ class ShugrPiOS:
 
             # shutdown
             if event.type == pygame.QUIT or (event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE):
-                self.pre_shutdown()
+                self.shutdown()
 
             if event.type == pygame.KEYDOWN:
                 if phase == -2:
@@ -1473,7 +1490,7 @@ class ShugrPiOS:
                     if not self.dialog_menu.has_ui:
                         self.dialog_menu.fade_out()
 
-                    if self.current_room[3] == "games":
+                    if self.current_room[0].name == "games":
 
                         # game wheel
                         if self.game_wheel.selected[1] and not self.game_menu.toggled:
@@ -1517,7 +1534,7 @@ class ShugrPiOS:
                         else:
                             self.default_ui_nav(event)
 
-                    elif self.current_room[3] == "clock":
+                    elif self.current_room[0].name == "clock":
                         if not self.cm.events(event):
                             if event.key == pygame.K_UP:
                                 self.current_room[2].change_row(-1)
@@ -1576,6 +1593,9 @@ class ShugrPiOS:
             if self.rooms["network"][0].active:
                 self.nm.draw(self.rooms["network"][1])
 
+            if self.rooms["wifi_list"][0].active:
+                self.nm.draw_alt(self.rooms["wifi_list"][1])
+
             if self.rooms["power"][0].active:
                 self.power_header_text.draw(self.rooms["power"][1])
 
@@ -1583,7 +1603,7 @@ class ShugrPiOS:
 
             self.notification.draw(self.display)
 
-            self.fps_text.draw(self.display)
+            # self.fps_text.draw(self.display)
 
             self.virtual_keyboard.draw(self.display)
 
@@ -1612,7 +1632,7 @@ class ShugrPiOS:
 
     def execute_game(self):
         proc, path, env = self.game_wheel.prepare_game()
-        if audio_driver:
+        if audio_driver != "dummy":
             pygame.mixer.pause()
         self.running_game[0] = self.game_wheel.lowest_game.name
 
@@ -1655,7 +1675,7 @@ class ShugrPiOS:
         self.curtain.fade_to(0)
         self.game_wheel.selected[0] = True
 
-        if audio_driver:
+        if audio_driver != "dummy":
             pygame.mixer.unpause()
         self.am.play_music("shugrpi_bg")
         self.game_menu.toggled = True
@@ -1803,8 +1823,8 @@ class ShugrPiOS:
         self.ui_managers[name] = UiManager(ui_group, am=self.am)
 
     def create_room(self, name, x, y, um=UiManager([UiElement("", 0, 0, 0, 0, group=[])])):
-        new_room = Room(x, y)
-        self.rooms[name] = [new_room, new_room.surf, um, name]
+        new_room = Room(name, x, y)
+        self.rooms[name] = [new_room, new_room.surf, um]
 
     def switch_room(self, name):
         self.current_room = self.rm.switch_to(name)

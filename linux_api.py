@@ -1,6 +1,7 @@
 """Linux API for the SHUGRPi Operating System"""
 
 import subprocess
+import sys
 
 # Linux API
 class Linux:
@@ -28,39 +29,92 @@ class Linux:
     """network commands"""
     def connect_wifi(self, ssid, psk_key):
         if not len(ssid):
-            self._notify(f"`SSID` field cannot be empty", True)
+            self._notify("`SSID` field cannot be empty")
             return -1
 
         if not len(psk_key):
-            self._notify(f"`Password` field cannot be empty", True)
+            self._notify("`Password` field cannot be empty")
+            return -1
+
+        if not self.is_shugrpi:
+            self.logger.warning(f"Non-SHUGRPi device cannot connect to `{ssid}`")
+            self._notify(f"Non-SHUGRPi device cannot connect to `{ssid}`")
             return -1
 
         self.logger.info(f"Attempting a connection to `{ssid}`...")
+
+        iface = "wlan0"
+        if iface is None:
+            self._notify("No Wi-Fi adapter detected")
+            return 1
+
+        con_name = "shugrpi-wifi"
+        masked = len(psk_key) * "*"
+
+        self._run(["nmcli", "con", "delete", con_name])
+
+        steps = [
+            ["nmcli", "con", "add", "type", "wifi", "ifname", iface, "con-name", con_name, "ssid", ssid],
+            ["nmcli", "con", "modify", con_name, "wifi-sec.key-mgmt", "wpa-psk"],
+            ["nmcli", "con", "modify", con_name, "wifi-sec.psk", psk_key],
+            ["nmcli", "con", "up", con_name],
+        ]
+
+        for step in steps:
+            code, err = self._run(step)
+            if code != 0:
+                self.logger.error(
+                    f"Failed to connect to `{ssid}` using the password '{masked}': {(err or 'unknown error').strip()}")
+                self._notify(f"Failed to connect to `{ssid}`")
+                self._run(["nmcli", "con", "delete", con_name])
+                return 1
+
+        self.logger.info(f"Connected successfully to `{ssid}` using the password '{masked}'")
+        self._notify(f"Connected successfully to `{ssid}`")
+        return 0
+
+    def is_wifi_connected(self):
         if not self.is_shugrpi:
-            self.logger.warning(f"Non-SHUGRPi device cannot connect to `{ssid}`")
-            self._notify(f"Non-SHUGRPi device cannot connect to `{ssid}`", True)
+            return -1
+        code, _ = self._run(["nmcli", "-t", "-f", "NAME", "con", "show", "--active"])
+        if code != 0:
+            return False
+        return "shugrpi-wifi" in out.strip().splitlines()
+
+    def disconnect_wifi(self, forget=False):
+        if not self.is_shugrpi:
             return -1
 
         con_name = "shugrpi-wifi"
-        make_profile_proc, _ = self._run(["nmcli", "con", "add", "type", "wifi", "ifname", "con-name", con_name, "ssid", ssid])
-        set_security_proc, _ = self._run(["nmcli", "con", "mod", con_name, "wifi-sec.key-mgmt", "wpa-psk"])
-        set_psk_proc, _ = self._run(["nmcli", "con", "mod", con_name, "wifi-sec.key-psk", psk_key])
 
-        all_procs = [make_profile_proc, set_security_proc, set_psk_proc]
-        if 1 not in all_procs and -1 not in all_procs:
-            self.logger.info(f"Connected successfully to `{ssid}` using the password '{len(psk_key) * '*'}'")
-            self._notify(f"Connected successfully to `{ssid}`")
-            return 0
+        if self.is_wifi_connected():
+            code, err = self._run(["nmcli", "con", "down", con_name])
+            if code != 0:
+                self.logger.error(f"Failed to disconnect wifi: {(err or 'unknown error').strip()}")
+                self._notify("Failed to disconnect Wi-Fi")
+                return 1
         else:
-            self.logger.error(f"Failed to connect to `{ssid}` using the password '{len(psk_key) * '*'}'")
-            self._notify(f"Failed to connect to `{ssid}`", True)
-            return 1
+            self.logger.info("Wi-Fi already disconnected")
+
+        if forget:
+            del_code, del_err = self._run(["nmcli", "con", "delete", con_name])
+            if del_code != 0:
+                self.logger.warning(f"Disconnected but failed to forget saved network: {(del_err or '').strip()}")
+
+        msg = "Disconnected from Wi-Fi" + (" and forgot the network" if forget else "")
+        self.logger.info(msg)
+        self._notify(msg)
+        return 0
 
     def reload_wifi(self, ssid, psk_key):
-        pass
-
-    def disconnect_wifi(self):
-        pass
+        if not self.is_wifi_connected():
+            code, err = self._run(["nmcli", "con", "up", con_name])
+            if code != 0:
+                self.logger.error(f"Failed to connect wifi: {(err or 'unknown error').strip()}")
+                self._notify("Failed to disconnect Wi-Fi")
+                return 1
+        else:
+            self.logger.info("Wi-Fi already connected")
 
     def ping(self):
         code = self._call(["ping", "-c", "2", "8.8.8.8"])
@@ -113,7 +167,7 @@ class Linux:
     """runners"""
     def _call(self, proc):
         if self.is_shugrpi:
-            return subprocess.call(proc) == 0
+            return subprocess.call(proc, stdout=subprocess.DEVNULL) == 0
         return -1
 
     def _run(self, proc):

@@ -1,7 +1,7 @@
 """Constants for the SHUGRPi OS"""
 
 # version (major.minor)
-VERSION = "0.9"
+VERSION = "0.8"
 
 # frame rate
 FPS = 60

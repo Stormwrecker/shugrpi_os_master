@@ -158,7 +158,7 @@ class NetworkManager:
 
         self.ip = self._get_ip()
 
-        self.statuses = ["Poor", "Moderate", "Good", "Excellent"]
+        self.statuses = {"Poor":[0, 25], "Moderate":[26, 50], "Good":[51, 75], "Excellent":[76, 100]}
         self.signal_strength = 0
         self.status = "inactive"
 
@@ -175,6 +175,11 @@ class NetworkManager:
         self.text_fields = {}
 
         self.ui_group = pygame.sprite.Group()
+
+        self.available_networks = []
+        self.wifi_ui_group = pygame.sprite.Group()
+
+        self._setup_empty_list()
 
     def _get_ip(self):
         return gethostbyname(gethostname())
@@ -215,56 +220,108 @@ class NetworkManager:
                 self.logged = True
             return False
 
-    def setup_ui(self, virtual_keyboard):
+    def scan_networks(self):
+        return [{"ssid":"Hamburger", "signal":38}, {"ssid":"Stuff", "signal":90}, {"ssid":"Yep n Nope", "signal":60}, {"ssid":"The Big One", "signal":0}]
+
+    def setup_ui(self):
         first_col_x = 75
-        first_col_y = 244
+        first_col_y = 225
 
         second_col_x = HALF_DISPLAY_WIDTH + 125
-        second_col_y = 250
+        second_col_y = 225
 
         self.main_header_text = Text("Network Settings", HALF_DISPLAY_WIDTH, 85, WHITE, 25, default_font, centered=True)
 
         self.wifi_header_text = Text("Network Status", 190, first_col_y - 50, WHITE, 15, default_font, True)
-        self.wifi_name_text = Text(f"Wifi Connection: {self.ssid}", first_col_x, first_col_y, WHITE, 11, default_font, False)
+        self.wifi_name_text = Text(f"Wifi Name: {self.ssid}", first_col_x, first_col_y, WHITE, 11, default_font, False)
         self.status_text = Text(f"Status: {self.status}", first_col_x, first_col_y + 50, WHITE, 11, default_font, False)
-        self.signal_text = Text(f"Signal Strength: {self.statuses[self.signal_strength]}", first_col_x, first_col_y + 100, WHITE, 11, default_font, False)
+        self.signal_text = Text("Signal Strength: None", first_col_x, first_col_y + 100, WHITE, 11, default_font, False)
+        self.disconnect_ui = UiElement("Disconnect", first_col_x + 110, first_col_y + 155, 1, 0, size=10, font=default_font, group=self.ui_group, func=self.disconnect_wifi)
+        self.wifi_list_ui = UiElement("Available Networks", second_col_x + 45, HALF_DISPLAY_HEIGHT + 20, 0, 0, size=10, font=default_font, group=self.ui_group, centered=True)
 
         self.connect_header_text = Text("Wifi Setup", second_col_x + 50, first_col_y - 50, WHITE, 15, default_font, True)
 
-        self.ssid_text = Text("SSID", second_col_x - 50, second_col_y + 2, WHITE, 12, default_font, True)
-        self.text_fields["ssid"] = TextField(second_col_x + 100, second_col_y, 0, 0, 200, 30, "Enter your SSID here", group=self.ui_group, keyboard=virtual_keyboard)
-        self.password_text = Text("Password", second_col_x - 70, second_col_y + 52, WHITE, 12, default_font, True)
-        self.text_fields["psk_key"] = TextField(second_col_x + 100, second_col_y + 50, 1, 0, 200, 30, "Enter your password here", group=self.ui_group, keyboard=virtual_keyboard, needs_hash=True)
+        self.board_rects = [pygame.Rect(first_col_x - 10, first_col_y - 15, 250, 150)]
 
-        self.connect_ui = UiElement("Connect", second_col_x + 35, second_col_y + 100, 2, 0, size=10, font=default_font, group=self.ui_group, func=lambda: self.connect_wifi(self.text_fields["ssid"], self.text_fields["psk_key"]))
+    def _setup_empty_list(self):
+        self.list_image = pygame.Surface((408, (DISPLAY_HEIGHT - 30) - (HALF_DISPLAY_HEIGHT - 90))).convert_alpha()
+        self.list_image.set_colorkey(BLACK)
+        self.list_image.fill(BLACK)
+        self.list_rect = self.list_image.get_rect()
+        self.list_rect.midtop = (HALF_DISPLAY_WIDTH, HALF_DISPLAY_HEIGHT - 90)
+
+        self.shadow_surf = pygame.Surface((self.list_rect.width, self.list_rect.height)).convert()
+        self.shadow_surf.set_colorkey(BLACK)
+        self.shadow_surf.fill(BLACK)
+        for i in range(self.list_rect.height):
+            pygame.draw.line(self.shadow_surf, ([min(i // 4 + 50, 70) for _ in range(3)]), (0, i * 4),
+                             (self.list_rect.width, i * 4), 4)
+
+    def setup_wifi_list_ui(self, images):
+        self.list_header_text = Text("Network List", HALF_DISPLAY_WIDTH, 85, WHITE, 20, default_font, centered=True)
+
+        self.available_networks = self.scan_networks()
+        strength_ranges = [[0, 33], [34, 66], [66, 100]]
+        for i, network in enumerate(self.available_networks):
+            for j, range in enumerate(strength_ranges):
+                if range[0] <= network["signal"] <= range[1]:
+                    temp_signal = j
+            wifi_ui = WifiBlockUI(network["ssid"], temp_signal, self.list_rect.width // 2, 60 + (i * 100), i, 0, images)
+            self.wifi_ui_group.add(wifi_ui)
+        self.wifi_um = UiManager(self.wifi_ui_group)
 
     def connect_wifi(self, ssid, psk_key):
-        self.disconnect_wifi()
+        self.linux.disconnect_wifi()
         if self.linux.connect_wifi(ssid.value, psk_key.value) == 0:
             self.dm.update("network", {"ssid":ssid.value, "psk-key":psk_key.value})
 
     def disconnect_wifi(self):
-        self.wifi_connected = False
-        self.internet_access = False
-        self.linux.disconnect_wifi()
-        self.logger.info(f"NetworkManager: disconnected wifi")
+        if self.linux.disconnect_wifi() == 0:
+            self.wifi_connected = False
+            self.internet_access = False
+            self.logger.info(f"NetworkManager: disconnected wifi")
 
-    def update(self):
-        self.wifi_name_text.set_text(f"Wifi Connection: " + str(self.ssid))
+    def ask_connect(self):
+        pass
+
+    def handle_event(self, event):
+        pass
+
+    def update(self, dt):
+        self.wifi_name_text.set_text(f"Wifi Name: " + str(self.ssid))
         self.status_text.set_text(f"Status: {self.status}")
-        self.signal_text.set_text(f"Signal Strength: {self.statuses[self.signal_strength] if self.wifi_connected else "None"}")
+
+        current_status = None
+        if current_status is not None:
+            self.signal_text.set_text(f"Signal Strength: {current_status if self.wifi_connected else None}")
+        else:
+            for name, range in self.statuses.items():
+                if self.signal_strength >= range[0] and self.signal_strength <= range[1]:
+                    current_status = name
+
+        self.disconnect_ui.available = self.wifi_connected
+
+        self.wifi_um.update(dt)
 
     def draw(self, display):
+        for rect in self.board_rects:
+            pygame.draw.rect(display, GRAY, rect, border_radius=3)
+
         self.main_header_text.draw(display)
 
         self.wifi_header_text.draw(display)
+
         self.wifi_name_text.draw(display)
         self.status_text.draw(display)
         self.signal_text.draw(display)
 
         self.connect_header_text.draw(display)
-        self.ssid_text.draw(display)
-        self.password_text.draw(display)
+
+    def draw_alt(self, display):
+        self.list_header_text.draw(display)
+        self.list_image.blit(self.shadow_surf, (0, 0))
+        self.wifi_um.draw(self.list_image)
+        display.blit(self.list_image, self.list_rect)
 
     def quit(self):
         self.stop_event.set()
@@ -317,7 +374,7 @@ class ClockManager:
         self.minute = self.current_time.tm_min
         self.round_clock = self.dm.data["round_clock"]
 
-        self.round_clock_labels = ["Round Clock: ON", "Round Clock: OFF"]
+        self.round_clock_labels = ["Round Clock: OFF", "Round Clock: ON"]
 
         self.logger.info(f"Startup time: {time.strftime("%m-%d-%Y %I:%M %p", self.current_time)}")
 
@@ -1154,11 +1211,51 @@ class TextField(pygame.sprite.Sprite):
             pygame.draw.rect(display, WHITE, self.actual_rect, 4, border_radius=3)
 
 
+# wifi block
+class WifiBlockUI(pygame.sprite.Sprite):
+    def __init__(self, ssid, signal, x, y, row, col, images):
+        pygame.sprite.Sprite.__init__(self)
+        self.ssid = ssid
+        self.signal = signal
+        self.row = row
+        self.col = col
+        self.image = pygame.Surface((360, 80)).convert()
+        self.image.set_colorkey(BLACK)
+        self.rect = self.image.get_rect()
+        self.rect.center = (x, y)
+
+        self.background_rect = pygame.Rect((0, 0, self.rect.width, self.rect.height))
+        self.images = [images[image] for image in images if image.startswith("signal")]
+
+        self.text = Text(ssid, 10, self.rect.height - 25, WHITE, 10)
+        self.connect_text = Text("Connect", self.rect.width * 2 // 3, self.rect.height // 2, WHITE, 15, centered=True)
+
+    def update(self, dt, col, row):
+        self.check_selected(col, row)
+
+    def check_selected(self, col, row):
+        self.selected = False
+        if row == self.row and col == self.col:
+            self.selected = True
+
+    def draw(self, display):
+        self.image.fill(BLACK)
+        pygame.draw.rect(self.image, (90, 90, 90), self.background_rect, border_radius=3)
+        self.text.draw(self.image)
+        self.connect_text.draw(self.image)
+        self.image.blit(self.images[self.signal], (10, 5))
+        display.blit(self.image, self.rect)
+        if self.selected:
+            pygame.draw.rect(display, WHITE, self.rect, 3, border_radius=3)
+
+
 """ Room Utilities """
 
 # room object
 class Room:
-    def __init__(self, x, y):
+    def __init__(self, name, x, y):
+        self.name = name
+
         self.orig_x = x
         self.orig_y = y
 
@@ -1173,6 +1270,7 @@ class Room:
 
         self.active = self.x == 0 and self.y == 0
         self.moving = False
+        self.true_active = False
 
     def move(self, dx=0, dy=0):
         self.x = dx
@@ -1183,7 +1281,7 @@ class Room:
     def clear(self):
         self.surf.fill((0, 0, 0, 0))
 
-    def update_pos(self, dt):
+    def update_pos(self, name, dt):
         if self.moving:
             actual_target_x = self.x * DISPLAY_WIDTH
             diff = abs(self.rect.x - actual_target_x)
@@ -1201,12 +1299,19 @@ class Room:
 
             if self.rect.x == actual_target_x and self.rect.y == actual_target_y:
                 self.moving = False
+
+            if self.name == name:
+                self.true_active = True
         else:
-            if self.y != 0 or self.x != 0:
+            if self.name != name:
                 self.active = False
+                self.true_active = False
+            else:
+                self.true_active = True
 
     def draw(self, display):
-        display.blit(self.surf, self.rect)
+        if self.true_active:
+            display.blit(self.surf, self.rect)
 
 
 # room manager
@@ -1220,6 +1325,7 @@ class RoomManager:
 
     def switch_to(self, name):
         target_room = self.rooms[name]
+
         target_room[2].reset()
         target_room[0].move(0, 0)
         if target_room[2] is not None:
@@ -1227,16 +1333,23 @@ class RoomManager:
 
         if self.current_room[2] is not None:
             self.current_room[2].active = False
-        self.current_room[0].move(self.current_room[0].orig_x - target_room[0].orig_x, self.current_room[0].orig_y - target_room[0].orig_y)
+        diff_x = self.current_room[0].x - target_room[0].orig_x
+        diff_y = self.current_room[0].y - target_room[0].orig_y
+
+        for room in self.rooms.values():
+            room[2].reset()
+            if room[0].name != target_room[0].name:
+                room[0].move(room[0].orig_x + diff_x, room[0].orig_y + diff_y)
 
         self.current_room = target_room
+
         return self.current_room
 
     def update(self, dt):
         self.active_rooms = [room[0] for room in self.rooms.values() if room[0].active]
 
         for _, room in self.rooms.items():
-            room[0].update_pos(dt)
+            room[0].update_pos(self.current_room[0].name, dt)
 
     def clear(self):
         for _, room in self.rooms.items():
