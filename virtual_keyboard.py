@@ -174,7 +174,6 @@ class VirtualKeyboard:
     def draw(self, display):
         if self.curtain_alpha:
             display.blit(self.curtain, self.curtain_rect)
-            self.text_field.draw(display)
 
         display.blit(self.image, (self.rect.x, self.rect.y + self.scroll))
         display.blit(self.button_image, (self.rect.x, self.rect.y + self.scroll))

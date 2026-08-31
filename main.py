@@ -1158,7 +1158,7 @@ class ShugrPiOS:
         self.cm = ClockManager(self.linux, dm, logger)
         self.am = AudioManager(logger, self.is_shugrpi)
         self.gm = GameManager(dm)
-        self.nm = NetworkManager(self.linux, dm, logger)
+        self.nm = NetworkManager(self.linux, dm, logger, master_images)
 
         # time setup
         self.clock = pygame.time.Clock()
@@ -1210,7 +1210,7 @@ class ShugrPiOS:
         self.banner_bottom_rect = self.banner_bottom.get_rect()
         self.banner_bottom_rect.midbottom = (HALF_DISPLAY_WIDTH, DISPLAY_HEIGHT)
 
-        self.dialog_menu = DialogMenu(self.screen, WELCOME_MSG, has_ui=True, am=self.am)
+        self.dialog_menu = DialogMenu(self.screen, WELCOME_MSG, has_ui=True, am=self.am, virtual_keyboard=self.virtual_keyboard)
         self.notification = Notification(None, self.am)
         self.linux.set_notification(self.notification)
 
@@ -1225,13 +1225,11 @@ class ShugrPiOS:
         self.create_room("games", 0, 0, self.ui_managers["games"])
         self.create_room("clock", 0, -1, self.ui_managers["clock"])
         self.create_room("network", 0, -1, self.ui_managers["network"])
-        self.create_room("wifi_list", 1, -1, self.ui_managers["wifi_list"])
+        self.create_room("wifi_list", 1, -1)
         self.create_room("power", 0, -1, self.ui_managers["power"])
 
         self.rm = RoomManager(self.rooms)
         self.current_room = self.rm.current_room
-
-        self.update_wifi_list_room()
 
         # installation setup
         self.installations = {}
@@ -1274,8 +1272,6 @@ class ShugrPiOS:
         self.network_ui = UiElement(self.get_image("wifi_on"), DISPLAY_WIDTH - 75, 0, 0, 1, size=10, font=retro_font, group=ui_group, func= lambda: self.switch_room("network"))
         self.power_ui = UiElement(pygame.transform.scale(self.get_image("battery"), (30, 30)), DISPLAY_WIDTH - 40, 0, 0, 2, size=10, font=retro_font, group=ui_group, func= lambda: self.switch_room("power"))
 
-
-
         self.game_menu = GameMenu(self.am, self.fade_to_game)
 
         self.create_ui_manager("games", ui_group)
@@ -1292,7 +1288,14 @@ class ShugrPiOS:
 
     def setup_network_room(self):
         self.nm.setup_ui()
-        self.add_text_fields(self.nm.text_fields)
+
+        first_col_x = 75
+        first_col_y = 225
+        second_col_x = HALF_DISPLAY_WIDTH + 125
+        second_col_y = 225
+
+        self.nm.disconnect_ui = UiElement("Disconnect", first_col_x + 110, first_col_y + 155, 1, 0, size=10, font=default_font, group=self.nm.ui_group, func=self.nm.disconnect_wifi)
+        self.nm.wifi_list_ui = UiElement("Available Networks", second_col_x + 45, HALF_DISPLAY_HEIGHT + 20, 0, 0, size=10, font=default_font, group=self.nm.ui_group, centered=True, func=lambda: self.switch_room("wifi_list"))
 
         back_btn = self.add_back_button(self.nm.ui_group, 2)
 
@@ -1300,10 +1303,10 @@ class ShugrPiOS:
 
     def setup_wifi_list_room(self):
         self.nm.setup_wifi_list_ui(master_images)
-        self.create_ui_manager("wifi_list", pygame.sprite.Group())
-
-    def update_wifi_list_room(self):
-        self.nm.wifi_list_ui.func = lambda: self.rm.switch_to("wifi_list")
+        self.nm.back_button = UiElement("Back", 80, HALF_DISPLAY_HEIGHT, 0, 0, centered=True, font=default_font, group=self.nm.misc_group, func=lambda: self.switch_room("network"))
+        self.nm.refresh_button = UiElement("Refresh", HALF_DISPLAY_WIDTH, 120, 0, 1, centered=True, size=12, font=default_font, group=self.nm.misc_group, func=self.nm._get_networks)
+        self.nm.dummy_ui = UiElement(" ", -100, -100, 0, 2, centered=True, font=default_font, group=self.nm.misc_group)
+        self.nm.misc_um = UiManager(self.nm.misc_group)
 
     def setup_power_room(self):
         ui_group = pygame.sprite.Group()
@@ -1429,6 +1432,11 @@ class ShugrPiOS:
                     self.rm.current_room[2].active = False
                     self.game_wheel.selected[1] = False
                     self.game_menu.um.active = False
+                    if self.dialog_menu.text_field is not None:
+                        self.text_fields["dialog"] = self.dialog_menu.text_field
+                    else:
+                        if "dialog" in self.text_fields:
+                            del self.text_fields["dialog"]
                 else:
                     self.rm.current_room[2].active = True
                     self.game_menu.um.active = True
@@ -1478,10 +1486,20 @@ class ShugrPiOS:
 
                     # dialog menu
                     if self.dialog_menu.showing and self.dialog_menu.has_ui:
-                        if event.key in [pygame.K_UP, pygame.K_LEFT]:
-                            self.dialog_menu.um.change_col(-1)
-                        if event.key in [pygame.K_DOWN, pygame.K_RIGHT]:
-                            self.dialog_menu.um.change_col(1)
+                        if self.dialog_menu.text_field is None:
+                            if event.key in [pygame.K_UP, pygame.K_LEFT]:
+                                self.dialog_menu.um.change_col(-1)
+                            if event.key in [pygame.K_DOWN, pygame.K_RIGHT]:
+                                self.dialog_menu.um.change_col(1)
+                        else:
+                            if event.key == pygame.K_LEFT:
+                                self.dialog_menu.um.change_col(-1)
+                            elif event.key == pygame.K_RIGHT:
+                                self.dialog_menu.um.change_col(1)
+                            if event.key == pygame.K_UP:
+                                self.dialog_menu.um.change_row(-1)
+                            elif event.key == pygame.K_DOWN:
+                                self.dialog_menu.um.change_row(1)
                         if event.key == pygame.K_RETURN:
                             self.dialog_menu.um.action()
                             self.handle_dialog_output()
@@ -1550,6 +1568,10 @@ class ShugrPiOS:
                         if event.key == pygame.K_BACKSPACE:
                             self.switch_room("games")
 
+                    elif self.current_room[0].name == "wifi_list":
+                        if not self.dialog_menu.alpha:
+                            self.nm.handle_event(event, self.dialog_menu)
+
                     else:
                         self.default_ui_nav(event)
 
@@ -1603,11 +1625,17 @@ class ShugrPiOS:
 
             self.notification.draw(self.display)
 
-            # self.fps_text.draw(self.display)
+            self.fps_text.draw(self.display)
+
+            if self.dialog_menu.text_field:
+                self.dialog_menu.draw(self.display)
 
             self.virtual_keyboard.draw(self.display)
 
-            self.dialog_menu.draw(self.display)
+            if self.dialog_menu.text_field is None:
+                self.dialog_menu.draw(self.display)
+
+            self.dialog_menu.draw_text(self.display)
 
             self.curtain.draw(self.display)
 
@@ -1807,9 +1835,10 @@ class ShugrPiOS:
             if self.dialog_menu.choice == 1:
                 self.remove_game()
 
-    def add_text_fields(self, d):
-        for k, v in d.items():
-            self.text_fields[k] = v
+        # connect wifi
+        if self.dialog_menu.dialog_type == 3:
+            if self.dialog_menu.choice == 1:
+                self.nm.connect_wifi(str(self.nm.wifi_um), self.dialog_menu.text_field.value)
 
     def _dump_log(self):
         temp_log_file = os.path.join(base_path, "logs", "temp_session.log")
@@ -1822,7 +1851,7 @@ class ShugrPiOS:
     def create_ui_manager(self, name, ui_group):
         self.ui_managers[name] = UiManager(ui_group, am=self.am)
 
-    def create_room(self, name, x, y, um=UiManager([UiElement("", 0, 0, 0, 0, group=[])])):
+    def create_room(self, name, x, y, um=UiManager([UiElement("", 0, 0, -100, -100, group=[])])):
         new_room = Room(name, x, y)
         self.rooms[name] = [new_room, new_room.surf, um]
 

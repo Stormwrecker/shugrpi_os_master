@@ -3,6 +3,8 @@
 # import setup modules
 import os
 import platform
+import random
+
 import pygame
 import logging
 import time
@@ -146,7 +148,7 @@ class AudioManager:
 
 # network management
 class NetworkManager:
-    def __init__(self, linux, dm, logger):
+    def __init__(self, linux, dm, logger, images):
         self.linux = linux
         self.dm = dm
         self.logger = logger
@@ -154,7 +156,7 @@ class NetworkManager:
         self.ssid = self.dm.data["network"]["ssid"]
         self.psk_key = self.dm.data["network"]["psk-key"]
 
-        self.linux.reload_wifi(self.ssid, self.psk_key)
+        # self.linux.reload_wifi(self.ssid, self.psk_key)
 
         self.ip = self._get_ip()
 
@@ -180,6 +182,8 @@ class NetworkManager:
         self.wifi_ui_group = pygame.sprite.Group()
 
         self._setup_empty_list()
+
+        self.images = [images[image] for image in images if image.startswith("signal")]
 
     def _get_ip(self):
         return gethostbyname(gethostname())
@@ -221,7 +225,8 @@ class NetworkManager:
             return False
 
     def scan_networks(self):
-        return [{"ssid":"Hamburger", "signal":38}, {"ssid":"Stuff", "signal":90}, {"ssid":"Yep n Nope", "signal":60}, {"ssid":"The Big One", "signal":0}]
+        networks = self.linux.scan_networks()
+        return networks
 
     def setup_ui(self):
         first_col_x = 75
@@ -236,8 +241,6 @@ class NetworkManager:
         self.wifi_name_text = Text(f"Wifi Name: {self.ssid}", first_col_x, first_col_y, WHITE, 11, default_font, False)
         self.status_text = Text(f"Status: {self.status}", first_col_x, first_col_y + 50, WHITE, 11, default_font, False)
         self.signal_text = Text("Signal Strength: None", first_col_x, first_col_y + 100, WHITE, 11, default_font, False)
-        self.disconnect_ui = UiElement("Disconnect", first_col_x + 110, first_col_y + 155, 1, 0, size=10, font=default_font, group=self.ui_group, func=self.disconnect_wifi)
-        self.wifi_list_ui = UiElement("Available Networks", second_col_x + 45, HALF_DISPLAY_HEIGHT + 20, 0, 0, size=10, font=default_font, group=self.ui_group, centered=True)
 
         self.connect_header_text = Text("Wifi Setup", second_col_x + 50, first_col_y - 50, WHITE, 15, default_font, True)
 
@@ -257,23 +260,36 @@ class NetworkManager:
             pygame.draw.line(self.shadow_surf, ([min(i // 4 + 50, 70) for _ in range(3)]), (0, i * 4),
                              (self.list_rect.width, i * 4), 4)
 
+    def _get_networks(self):
+        self.available_networks = self.scan_networks()
+        # self.available_networks = [{"ssid":f"HELLO{i}", "strength":20 * i} for i in range(random.randint(1, 4))]
+        self.available_networks = sorted(self.available_networks, key=lambda x: x["strength"], reverse=True)
+
+        self.wifi_ui_group.empty()
+        strength_ranges = [[0, 33], [34, 66], [66, 100]]
+        for i, network in enumerate(self.available_networks):
+            for j, r in enumerate(strength_ranges):
+                if r[0] <= network["strength"] <= r[1]:
+                    temp_signal = j
+            wifi_ui = WifiBlockUI(network["ssid"], temp_signal, self.list_rect.width // 2, 20 + (i * 100), i, 0, self.images)
+            self.wifi_ui_group.add(wifi_ui)
+        self.wifi_um = UiManager(self.wifi_ui_group)
+        self.wifi_um.active = False
+
     def setup_wifi_list_ui(self, images):
         self.list_header_text = Text("Network List", HALF_DISPLAY_WIDTH, 85, WHITE, 20, default_font, centered=True)
 
-        self.available_networks = self.scan_networks()
-        strength_ranges = [[0, 33], [34, 66], [66, 100]]
-        for i, network in enumerate(self.available_networks):
-            for j, range in enumerate(strength_ranges):
-                if range[0] <= network["signal"] <= range[1]:
-                    temp_signal = j
-            wifi_ui = WifiBlockUI(network["ssid"], temp_signal, self.list_rect.width // 2, 60 + (i * 100), i, 0, images)
-            self.wifi_ui_group.add(wifi_ui)
-        self.wifi_um = UiManager(self.wifi_ui_group)
+        self._get_networks()
+
+        self.scroll = 0
+        self.target_scroll = 0
+        self.scroll_increment = 100
+
+        self.misc_group = pygame.sprite.Group()
 
     def connect_wifi(self, ssid, psk_key):
-        self.linux.disconnect_wifi()
-        if self.linux.connect_wifi(ssid.value, psk_key.value) == 0:
-            self.dm.update("network", {"ssid":ssid.value, "psk-key":psk_key.value})
+        if self.linux.connect_wifi(ssid, psk_key) == 0:
+            self.dm.update("network", {"ssid":ssid, "psk-key":psk_key})
 
     def disconnect_wifi(self):
         if self.linux.disconnect_wifi() == 0:
@@ -281,11 +297,43 @@ class NetworkManager:
             self.internet_access = False
             self.logger.info(f"NetworkManager: disconnected wifi")
 
-    def ask_connect(self):
-        pass
+    def ask_connect(self, ssid, dialog):
+        dialog.reset(f"Enter password for\n'{self.wifi_um.get_ui(self.wifi_um.x_index, self.wifi_um.y_index).ssid}'", has_ui=True, options=["Connect", "Cancel"], dialog_type=3, text_field=True)
 
-    def handle_event(self, event):
-        pass
+    def handle_event(self, event, dialog):
+        if self.wifi_um.active:
+            if len(self.wifi_ui_group):
+                if event.key == pygame.K_UP:
+                    if self.wifi_um.y_index - 1 >= 0:
+                        self.wifi_um.change_row(-1)
+                    else:
+                        self.misc_um.active = True
+                        self.wifi_um.active = False
+                        self.misc_um.x_index = 1
+                if event.key == pygame.K_DOWN:
+                    self.wifi_um.change_row(1)
+                if event.key == pygame.K_LEFT:
+                    self.misc_um.active = True
+                    self.wifi_um.active = False
+                    self.misc_um.x_index = 1
+                if event.key == pygame.K_RIGHT:
+                    self.misc_um.active = True
+                    self.wifi_um.active = False
+                    self.misc_um.x_index = 0
+                if event.key == pygame.K_RETURN:
+                    self.ask_connect(self.wifi_um.action(), dialog)
+
+        elif self.misc_um.active:
+            if event.key in [pygame.K_RIGHT, pygame.K_DOWN]:
+                self.misc_um.change_col(1)
+            if event.key in [pygame.K_LEFT, pygame.K_UP]:
+                self.misc_um.change_col(-1)
+            if event.key == pygame.K_RETURN:
+                self.misc_um.action()
+            if self.misc_um.x_index == 2 and len(self.wifi_ui_group):
+                self.misc_um.active = False
+                self.wifi_um.active = True
+                self.misc_um.x_index = 1
 
     def update(self, dt):
         self.wifi_name_text.set_text(f"Wifi Name: " + str(self.ssid))
@@ -301,7 +349,14 @@ class NetworkManager:
 
         self.disconnect_ui.available = self.wifi_connected
 
+        self.target_scroll = min(self.scroll_increment * len(self.wifi_ui_group), max(0, self.scroll_increment * (self.wifi_um.y_index - 1)))
+
+        self.scroll = ease_out_to(self.scroll, self.target_scroll, 0.15)
+
         self.wifi_um.update(dt)
+        self.misc_um.update(dt)
+        for ui in self.wifi_ui_group:
+            ui.rect.y = ui.original_center[1] - self.scroll
 
     def draw(self, display):
         for rect in self.board_rects:
@@ -321,6 +376,7 @@ class NetworkManager:
         self.list_header_text.draw(display)
         self.list_image.blit(self.shadow_surf, (0, 0))
         self.wifi_um.draw(self.list_image)
+        self.misc_um.draw(display)
         display.blit(self.list_image, self.list_rect)
 
     def quit(self):
@@ -927,7 +983,9 @@ class Notification:
 
 # dialog menu
 class DialogMenu:
-    def __init__(self, screen, msg, instant=False, has_ui=False, options=["OK"], am=None):
+    def __init__(self, screen, msg, instant=False, has_ui=False, options=["OK"], am=None, virtual_keyboard=None):
+        self.virtual_keyboard = virtual_keyboard
+
         self.width = 500
         self.height = 250
 
@@ -946,6 +1004,10 @@ class DialogMenu:
         self.ui_surf.fill(GRAY)
         self.ui_surf.set_colorkey(BLACK)
 
+        self.text_surf = pygame.Surface((self.width, self.height)).convert_alpha()
+        self.text_surf.fill(GRAY)
+        self.text_surf.set_colorkey(BLACK)
+
         self.curtain = pygame.Surface((1, 1)).convert_alpha()
         self.curtain = pygame.transform.scale(self.curtain, (screen.get_width(), screen.get_height() - 60))
         self.curtain_rect = self.curtain.get_rect()
@@ -959,9 +1021,11 @@ class DialogMenu:
 
         self.am = am
 
+        self.text_field = None
+
         self.reset(msg, instant, has_ui, options)
 
-    def reset(self, msg, instant=False, has_ui=False, options=["OK"], dialog_type=None, error=False):
+    def reset(self, msg, instant=False, has_ui=False, options=["OK"], text_field=False, dialog_type=None, error=False):
         self.msg = msg
         self.dialog_type = dialog_type
 
@@ -986,20 +1050,24 @@ class DialogMenu:
         self.rect.center = (HALF_DISPLAY_WIDTH, self.y)
 
         self.has_ui = has_ui
+        self.text_field = None
 
         self.um = None
         if self.has_ui:
             self.ui_group = pygame.sprite.Group()
+            temp_row = 1 if text_field else 0
             for opt in options:
                 if opt in ["No", "Cancel"]:
-                    ok_btn = UiElement(opt, self.rect.width // 2 + 100, self.rect.height - 50, 0, 0, 20, font=retro_font, group=self.ui_group,
+                    ok_btn = UiElement(opt, self.rect.width // 2 + 100, self.rect.height - 50, temp_row, 0, 20, font=retro_font, group=self.ui_group,
                                        func=self.fade_out)
                 elif opt == "OK":
                     ok_btn = UiElement(opt, self.rect.width // 2, self.rect.height - 50, 0, 0, 20, font=retro_font, group=self.ui_group,
                                        func=self.fade_out)
-                elif opt in ["Yes", "Install", "Uninstall", "Remove"]:
-                    ok_btn = UiElement(opt, self.rect.width // 2 - 100, self.rect.height - 50, 0, 1, 20, font=retro_font, group=self.ui_group,
+                elif opt in ["Yes", "Install", "Uninstall", "Remove", "Connect"]:
+                    ok_btn = UiElement(opt, self.rect.width // 2 - 100, self.rect.height - 50, temp_row, 1, 20, font=retro_font, group=self.ui_group,
                                        func=self.fade_out)
+            if text_field:
+                self.text_field = TextField(self.width // 2, self.height // 2 + 15, 0, 0, 200, 30, "Type your password here", group=self.ui_group, keyboard=self.virtual_keyboard, new_center=(self.width // 2, self.height // 2 - 20))
             self.um = UiManager(self.ui_group, am=self.am)
 
         self.small_msg = []
@@ -1075,6 +1143,7 @@ class DialogMenu:
     def update(self, dt):
         self.surf.set_alpha(int(self.alpha))
         self.ui_surf.set_alpha(int(self.alpha))
+        self.text_surf.set_alpha(int(self.alpha))
         self.curtain.set_alpha(int(self.curtain_alpha))
 
         if self.has_ui:
@@ -1101,6 +1170,7 @@ class DialogMenu:
 
     def draw(self, display):
         if self.alpha:
+            self.text_surf.fill(BLACK)
             display.blit(self.curtain, self.curtain_rect)
             if self.has_ui:
                 self.ui_surf.fill(BLACK)
@@ -1109,10 +1179,15 @@ class DialogMenu:
             if self.has_ui:
                 display.blit(self.ui_surf, self.rect)
 
+    def draw_text(self, display):
+        if self.text_field is not None:
+            self.text_field.draw(self.text_surf)
+            display.blit(self.text_surf, self.rect)
+
 
 # text field
 class TextField(pygame.sprite.Sprite):
-    def __init__(self, x, y, row, col, w, h, default_text, group, keyboard, needs_hash=False):
+    def __init__(self, x, y, row, col, w, h, default_text, group, keyboard, needs_hash=False, new_center=None):
         pygame.sprite.Sprite.__init__(self, group)
 
         self.size = h//2
@@ -1131,6 +1206,8 @@ class TextField(pygame.sprite.Sprite):
 
         self.original_pos = list(self.actual_rect.center)
         self.pos = list(self.actual_rect.center)
+
+        self.center = (HALF_DISPLAY_WIDTH, 175) if new_center is None else new_center
 
         self.keyboard = keyboard
 
@@ -1162,8 +1239,8 @@ class TextField(pygame.sprite.Sprite):
                 self.true_selected = False
 
         if self.in_view:
-            self.pos[0] = ease_out_to(self.pos[0], HALF_DISPLAY_WIDTH, self.speed * dt)
-            self.pos[1] = ease_out_to(self.pos[1], 175, self.speed * dt)
+            self.pos[0] = ease_out_to(self.pos[0], self.center[0], self.speed * dt)
+            self.pos[1] = ease_out_to(self.pos[1], self.center[1], self.speed * dt)
         else:
             self.pos[0] = ease_out_to(self.pos[0], self.original_pos[0], self.speed * dt)
             self.pos[1] = ease_out_to(self.pos[1], self.original_pos[1], self.speed * dt)
@@ -1204,9 +1281,9 @@ class TextField(pygame.sprite.Sprite):
         else:
             self.default_text.draw(self.image)
         display.blit(self.image, self.actual_rect)
-        pygame.draw.rect(display, GRAY, self.actual_rect, 4)
+        pygame.draw.rect(display, (90, 90, 90), self.actual_rect, 4)
         if self.true_selected and not self.selected:
-            pygame.draw.rect(display, (120, 120, 120), self.actual_rect, 4, border_radius=3)
+            pygame.draw.rect(display, GRAY, self.actual_rect, 4, border_radius=3)
         elif self.true_selected and self.selected:
             pygame.draw.rect(display, WHITE, self.actual_rect, 4, border_radius=3)
 
@@ -1223,12 +1300,15 @@ class WifiBlockUI(pygame.sprite.Sprite):
         self.image.set_colorkey(BLACK)
         self.rect = self.image.get_rect()
         self.rect.center = (x, y)
+        self.original_center = (x, y)
 
         self.background_rect = pygame.Rect((0, 0, self.rect.width, self.rect.height))
-        self.images = [images[image] for image in images if image.startswith("signal")]
+        self.images = images
 
         self.text = Text(ssid, 10, self.rect.height - 25, WHITE, 10)
         self.connect_text = Text("Connect", self.rect.width * 2 // 3, self.rect.height // 2, WHITE, 15, centered=True)
+
+        self.selected = False
 
     def update(self, dt, col, row):
         self.check_selected(col, row)
@@ -1237,6 +1317,9 @@ class WifiBlockUI(pygame.sprite.Sprite):
         self.selected = False
         if row == self.row and col == self.col:
             self.selected = True
+
+    def action(self):
+        return self.ssid
 
     def draw(self, display):
         self.image.fill(BLACK)
