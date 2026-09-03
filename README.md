@@ -9,7 +9,9 @@ The custom launcher `main.py` runs alongside Openbox (a lightweight window manag
 
 ## How does it work non-technically?
 The custom "OS" basically is a bunch of UI put together to navigate through your games and basic settings:
-<img width="975" height="586" alt="image" src="https://github.com/user-attachments/assets/6c4aca03-2137-4482-9a99-fac753ae9539" />
+
+<img width="797" height="479" alt="image" src="https://github.com/user-attachments/assets/5773d2e6-a5dd-47cb-af3c-83c0fe65f2a1" />
+
 
 Pretty simple stuff.
 
