@@ -1,11 +1,9 @@
 """Various utilities necessary to run the SHUGRPi OS"""
 
 # import setup modules
+import pygame
 import os
 import platform
-import random
-
-import pygame
 import logging
 import time
 import threading
@@ -149,6 +147,7 @@ class AudioManager:
 # network management
 class NetworkManager:
     def __init__(self, linux, dm, logger, images):
+        """Manager for network statuses, available networks, wifi connectivity, etc."""
         self.linux = linux
         self.dm = dm
         self.logger = logger
@@ -169,6 +168,7 @@ class NetworkManager:
         self.wifi_connected = self._check_wifi_connection()
         self.internet_access = self._check_internet_access()
 
+        # status updater for internet connection
         self.stop_event = threading.Event()
         self.wifi_lock = threading.Lock()
         self.wifi_thread = threading.Thread(name="SHUGRPi Network Manager", target=self._update_status, daemon=True)
@@ -186,9 +186,11 @@ class NetworkManager:
         self.images = [images[image] for image in images if image.startswith("signal")]
 
     def _get_ip(self):
+        """return device's IP address"""
         return gethostbyname(gethostname())
 
     def _check_wifi_connection(self):
+        """check if wifi is connected based on if IP is not 'localhost'"""
         new_ip = self._get_ip()
         if new_ip not in ["127.0.0.1", "localhost"]:
             self.ip = new_ip
@@ -196,6 +198,7 @@ class NetworkManager:
         return False
 
     def _update_status(self):
+        """threaded check for internet access every 3 seconds"""
         try:
             while not self.stop_event.wait(3):
                 self.wifi_connected = self._check_wifi_connection()
@@ -215,8 +218,8 @@ class NetworkManager:
                 self.status = "error"
 
     def _check_internet_access(self):
+        """check internet access based on linux.ping()"""
         if self.linux.ping() == 0:
-            # self.logger.info("SHUGRPi has access to the internet")
             return True
         else:
             if not self.logged:
@@ -225,10 +228,12 @@ class NetworkManager:
             return False
 
     def scan_networks(self):
+        """scan for available networks"""
         networks = self.linux.scan_networks()
         return networks
 
     def setup_ui(self):
+        """set up and arrange UI for main network room"""
         first_col_x = 75
         first_col_y = 225
 
@@ -247,6 +252,7 @@ class NetworkManager:
         self.board_rects = [pygame.Rect(first_col_x - 10, first_col_y - 15, 250, 150)]
 
     def _setup_empty_list(self):
+        """create shaded network-list board"""
         self.list_image = pygame.Surface((408, (DISPLAY_HEIGHT - 30) - (HALF_DISPLAY_HEIGHT - 90))).convert_alpha()
         self.list_image.set_colorkey(BLACK)
         self.list_image.fill(BLACK)
@@ -261,22 +267,30 @@ class NetworkManager:
                              (self.list_rect.width, i * 4), 4)
 
     def _get_networks(self):
+        """generate wifi UI blocks based on available networks"""
         self.available_networks = self.scan_networks()
         # self.available_networks = [{"ssid":f"HELLO{i}", "strength":20 * i} for i in range(random.randint(1, 4))]
         self.available_networks = sorted(self.available_networks, key=lambda x: x["strength"], reverse=True)
 
         self.wifi_ui_group.empty()
+
+        # get 'bars' based on signal strength
         strength_ranges = [[0, 33], [34, 66], [66, 100]]
         for i, network in enumerate(self.available_networks):
             for j, r in enumerate(strength_ranges):
                 if r[0] <= network["strength"] <= r[1]:
                     temp_signal = j
+
+            # wifi UI
             wifi_ui = WifiBlockUI(network["ssid"], temp_signal, self.list_rect.width // 2, 20 + (i * 100), i, 0, self.images)
             self.wifi_ui_group.add(wifi_ui)
+
+        # wifi UI manager for the list
         self.wifi_um = UiManager(self.wifi_ui_group)
         self.wifi_um.active = False
 
     def setup_wifi_list_ui(self, images):
+        """set up and arrange UI for wifi-list room"""
         self.list_header_text = Text("Network List", HALF_DISPLAY_WIDTH, 85, WHITE, 20, default_font, centered=True)
 
         self._get_networks()
@@ -288,19 +302,23 @@ class NetworkManager:
         self.misc_group = pygame.sprite.Group()
 
     def connect_wifi(self, ssid, psk_key):
+        """connect to wifi network with ssid and psk-key"""
         if self.linux.connect_wifi(ssid, psk_key) == 0:
             self.dm.update("network", {"ssid":ssid, "psk-key":psk_key})
 
     def disconnect_wifi(self):
+        """disconnect from current network"""
         if self.linux.disconnect_wifi() == 0:
             self.wifi_connected = False
             self.internet_access = False
             self.logger.info(f"NetworkManager: disconnected wifi")
 
     def ask_connect(self, ssid, dialog):
+        """bring up dialog prompt for password"""
         dialog.reset(f"Enter password for\n'{self.wifi_um.get_ui(self.wifi_um.x_index, self.wifi_um.y_index).ssid}'", has_ui=True, options=["Connect", "Cancel"], dialog_type=3, text_field=True)
 
     def handle_event(self, event, dialog):
+        """handle events for wifi-list room"""
         if self.wifi_um.active:
             if len(self.wifi_ui_group):
                 if event.key == pygame.K_UP:
@@ -336,6 +354,7 @@ class NetworkManager:
                 self.misc_um.x_index = 1
 
     def update(self, dt):
+        """update statuses for network connection and update UI"""
         self.wifi_name_text.set_text(f"Wifi Name: " + str(self.ssid))
         self.status_text.set_text(f"Status: {self.status}")
 
@@ -343,8 +362,8 @@ class NetworkManager:
         if current_status is not None:
             self.signal_text.set_text(f"Signal Strength: {current_status if self.wifi_connected else None}")
         else:
-            for name, range in self.statuses.items():
-                if self.signal_strength >= range[0] and self.signal_strength <= range[1]:
+            for name, r in self.statuses.items():
+                if self.signal_strength >= r[0] and self.signal_strength <= r[1]:
                     current_status = name
 
         self.disconnect_ui.available = self.wifi_connected
@@ -359,6 +378,7 @@ class NetworkManager:
             ui.rect.y = ui.original_center[1] - self.scroll
 
     def draw(self, display):
+        """draw network room"""
         for rect in self.board_rects:
             pygame.draw.rect(display, GRAY, rect, border_radius=3)
 
@@ -373,6 +393,7 @@ class NetworkManager:
         self.connect_header_text.draw(display)
 
     def draw_alt(self, display):
+        """draw wifi-list room"""
         self.list_header_text.draw(display)
         self.list_image.blit(self.shadow_surf, (0, 0))
         self.wifi_um.draw(self.list_image)
@@ -380,6 +401,7 @@ class NetworkManager:
         display.blit(self.list_image, self.list_rect)
 
     def quit(self):
+        """stop threads"""
         self.stop_event.set()
         self.logger.info(f"NetworkManager: quit")
 

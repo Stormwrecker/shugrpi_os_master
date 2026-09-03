@@ -206,7 +206,7 @@ class Linux:
         if self.is_shugrpi:
             done_proc = subprocess.run(proc, capture_output=True, text=True)
             return done_proc.returncode, done_proc.stderr, done_proc.stdout
-        return -1, None
+        return -1, None, None
 
     """notify"""
     def _notify(self, msg, error=False):

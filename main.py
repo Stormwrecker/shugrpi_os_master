@@ -1257,6 +1257,7 @@ class ShugrPiOS:
 
     """ room ui setup """
     def setup_game_room(self):
+        """setup and arrange UI for game room"""
         ui_group = pygame.sprite.Group()
 
         if dm.data["num_games"] != len(os.listdir(self.master_games_path)):
@@ -1278,6 +1279,7 @@ class ShugrPiOS:
         self.ui_managers["games"].y_index = 1
 
     def setup_clock_room(self):
+        """setup and arrange UI for clock room"""
         ui_group = pygame.sprite.Group()
 
         self.cm.setup_ui()
@@ -1287,6 +1289,7 @@ class ShugrPiOS:
         self.cm.set_um(self.ui_managers["clock"])
 
     def setup_network_room(self):
+        """setup and arrange UI for network room"""
         self.nm.setup_ui()
 
         first_col_x = 75
@@ -1302,6 +1305,7 @@ class ShugrPiOS:
         self.create_ui_manager("network", self.nm.ui_group)
 
     def setup_wifi_list_room(self):
+        """setup and arrange UI for wifi-list room"""
         self.nm.setup_wifi_list_ui(master_images)
         self.nm.back_button = UiElement("Back", 80, HALF_DISPLAY_HEIGHT, 0, 0, centered=True, font=default_font, group=self.nm.misc_group, func=lambda: self.switch_room("network"))
         self.nm.refresh_button = UiElement("Refresh", HALF_DISPLAY_WIDTH, 120, 0, 1, centered=True, size=12, font=default_font, group=self.nm.misc_group, func=self.nm._get_networks)
@@ -1309,6 +1313,7 @@ class ShugrPiOS:
         self.nm.misc_um = UiManager(self.nm.misc_group)
 
     def setup_power_room(self):
+        """setup and arrange UI for power room"""
         ui_group = pygame.sprite.Group()
         self.power_header_text = Text("Power Settings", HALF_DISPLAY_WIDTH, 85, WHITE, size=25, font=default_font, centered=True)
         self.power_ui = UiElement("Power Off", HALF_DISPLAY_WIDTH, 200, 0, 0, size=12, font=default_font, centered=True, group=ui_group, func=lambda: self.pre_shutdown(0, True))
@@ -1318,6 +1323,7 @@ class ShugrPiOS:
         self.create_ui_manager("power", ui_group)
 
     def add_back_button(self, ui_group, row=2):
+        """add a back button UI"""
         back_button = UiElement("Back", DISPLAY_WIDTH - 50, DISPLAY_HEIGHT - 20, row, 0, group=ui_group, func=lambda: self.switch_room("games"))
         return back_button
 
