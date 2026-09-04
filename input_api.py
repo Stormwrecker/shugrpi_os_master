@@ -161,3 +161,6 @@ if not p2_input and joysticks:
     p2_input = InputManager(INPUT_BINDINGS, InputDevice(keyboard=False, joystick=joysticks[0]))
 
 
+__all__ = ["ControllerManager",
+           "InputDevice",
+           "InputManager"]

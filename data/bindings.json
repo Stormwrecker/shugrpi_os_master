@@ -1,0 +1,132 @@
+{
+    "UP": [
+        {
+            "type": "key",
+            "value": 1073741906
+        },
+        {
+            "type": "button",
+            "value": 11
+        },
+        {
+            "type": "axis",
+            "axis": 1,
+            "direction": -1
+        }
+    ],
+    "DOWN": [
+        {
+            "type": "key",
+            "value": 1073741905
+        },
+        {
+            "type": "button",
+            "value": 12
+        },
+        {
+            "type": "axis",
+            "axis": 1,
+            "direction": 1
+        }
+    ],
+    "LEFT": [
+        {
+            "type": "key",
+            "value": 1073741904
+        },
+        {
+            "type": "button",
+            "value": 13
+        },
+        {
+            "type": "axis",
+            "axis": 0,
+            "direction": -1
+        }
+    ],
+    "RIGHT": [
+        {
+            "type": "key",
+            "value": 1073741903
+        },
+        {
+            "type": "button",
+            "value": 14
+        },
+        {
+            "type": "axis",
+            "axis": 0,
+            "direction": 1
+        }
+    ],
+    "A": [
+        {
+            "type": "key",
+            "value": 97
+        },
+        {
+            "type": "button",
+            "value": 0
+        }
+    ],
+    "B": [
+        {
+            "type": "key",
+            "value": 98
+        },
+        {
+            "type": "button",
+            "value": 1
+        }
+    ],
+    "X": [
+        {
+            "type": "key",
+            "value": 120
+        },
+        {
+            "type": "button",
+            "value": 2
+        }
+    ],
+    "Y": [
+        {
+            "type": "key",
+            "value": 121
+        },
+        {
+            "type": "button",
+            "value": 3
+        }
+    ],
+    "SELECT": [
+        {
+            "type": "key",
+            "value": 1073742053
+        },
+        {
+            "type": "button",
+            "value": 4
+        }
+    ],
+    "START": [
+        {
+            "type": "key",
+            "value": 13
+        },
+        {
+            "type": "button",
+            "value": 6
+        }
+    ],
+    "POWER": [
+        {
+            "type": "key",
+            "value": 27
+        },
+        {
+            "type": "button",
+            "value": 5
+        }
+    ]
+}
