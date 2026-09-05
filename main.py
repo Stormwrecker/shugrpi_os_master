@@ -574,9 +574,9 @@ class Game(pygame.sprite.Sprite):
         self.requirements = configs.get("requirements")
 
         if self.use_venv:
-            self.python_exec = os.path.join(self.root_path, ".venv", "Scripts" if not is_shugrpi else "bin", "python.exe" if not is_shugrpi else "python")
+            self.python_exec = os.path.join(self.root_path, ".venv", "Scripts" if not is_shugrpi else "bin", "python.exe" if not is_shugrpi else "python3")
         else:
-            self.python_exec = "python"
+            self.python_exec = "python3"
 
         temp_thumb = os.path.join(self.root_path, configs["thumbnail"]) if configs.get("thumbnail") else None
         self.thumbnail = load_thumbnail(temp_thumb, master_images["fail_load"])

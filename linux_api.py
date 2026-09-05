@@ -116,7 +116,7 @@ class Linux:
             return False
         return "shugrpi-wifi" in out.strip().splitlines()
 
-    def disconnect_wifi(self, forget=False):
+    def disconnect_wifi(self, forget=True):
         if not self.is_shugrpi:
             return -1
 
@@ -148,9 +148,11 @@ class Linux:
         else:
             self.logger.info("Wi-Fi already connected")
 
-    def ping(self):
-        code = self._call(["ping", "-c", "2", "8.8.8.8"])
-        return code
+    def check_internet_status(self):
+        _, _, out = self._run(["nmcli", "networking", "connectivity", "check"])
+        connectivity = out.strip()
+
+        return connectivity == "full"
 
     """git commands"""
     def git_clone(self, repo="https://github.com/Stormwrecker/shugrpi_os_master.git"):

@@ -205,7 +205,7 @@ class NetworkManager:
                 if self.wifi_connected:
                     with self.wifi_lock:
                         self.internet_access = self._check_internet_access()
-                        if self.internet_access:
+                        if self.internet_access == 0:
                             self.status = "connected"
                         else:
                             self.status = "no internet"
@@ -219,7 +219,7 @@ class NetworkManager:
 
     def _check_internet_access(self):
         """check internet access based on linux.ping()"""
-        if self.linux.ping() == 0:
+        if self.linux.check_internet_status() == 0:
             return True
         else:
             if not self.logged:
@@ -269,7 +269,7 @@ class NetworkManager:
     def _get_networks(self):
         """generate wifi UI blocks based on available networks"""
         self.available_networks = self.scan_networks()
-        # self.available_networks = [{"ssid":f"HELLO{i}", "strength":20 * i} for i in range(random.randint(1, 4))]
+        # self.available_networks = [{"ssid":f"HELLO{i}", "strength":20 * i} for i in range(5)]
         self.available_networks = sorted(self.available_networks, key=lambda x: x["strength"], reverse=True)
 
         self.wifi_ui_group.empty()
