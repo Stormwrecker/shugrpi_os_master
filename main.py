@@ -576,7 +576,7 @@ class Game(pygame.sprite.Sprite):
         if self.use_venv:
             self.python_exec = os.path.join(self.root_path, ".venv", "Scripts" if not is_shugrpi else "bin", "python.exe" if not is_shugrpi else "python3")
         else:
-            self.python_exec = "python3"
+            self.python_exec = os.path.join(base_path, ".venv", "Scripts" if not is_shugrpi else "bin", "python.exe" if not is_shugrpi else "python3")
 
         temp_thumb = os.path.join(self.root_path, configs["thumbnail"]) if configs.get("thumbnail") else None
         self.thumbnail = load_thumbnail(temp_thumb, master_images["fail_load"])
@@ -1308,7 +1308,7 @@ class ShugrPiOS:
         """setup and arrange UI for wifi-list room"""
         self.nm.setup_wifi_list_ui(master_images)
         self.nm.back_button = UiElement("Back", 80, HALF_DISPLAY_HEIGHT, 0, 0, centered=True, font=default_font, group=self.nm.misc_group, func=lambda: self.switch_room("network"))
-        self.nm.refresh_button = UiElement("Refresh", HALF_DISPLAY_WIDTH, 120, 0, 1, centered=True, size=12, font=default_font, group=self.nm.misc_group, func=self.nm._get_networks)
+        self.nm.refresh_button = UiElement("Refresh", HALF_DISPLAY_WIDTH, 120, 0, 1, centered=True, size=12, font=default_font, group=self.nm.misc_group, func=self.nm.start_scan)
         self.nm.dummy_ui = UiElement(" ", -100, -100, 0, 2, centered=True, font=default_font, group=self.nm.misc_group)
         self.nm.misc_um = UiManager(self.nm.misc_group)
 

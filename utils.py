@@ -174,6 +174,10 @@ class NetworkManager:
         self.wifi_thread = threading.Thread(name="SHUGRPi Network Manager", target=self._update_status, daemon=True)
         self.wifi_thread.start()
 
+        self.wifi_list_lock = threading.Lock()
+        self.wifi_list_thread = threading.Thread(name="SHUGRPi Wifi Scan", target=self.scan_networks, daemon=True)
+        self.is_scanning = False
+
         self.text_fields = {}
 
         self.ui_group = pygame.sprite.Group()
@@ -227,10 +231,16 @@ class NetworkManager:
                 self.logged = True
             return False
 
+    def start_scan(self):
+        if not self.is_scanning:
+            self.list_status_text.set_text("Scanning...")
+            self.wifi_list_thread = threading.Thread(name="SHUGRPi Wifi Scan", target=self.scan_networks, daemon=True)
+            self.wifi_list_thread.start()
+            self.is_scanning = True
+
     def scan_networks(self):
         """scan for available networks"""
-        networks = self.linux.scan_networks()
-        return networks
+        self.available_networks = self.linux.scan_networks()
 
     def setup_ui(self):
         """set up and arrange UI for main network room"""
@@ -266,9 +276,10 @@ class NetworkManager:
             pygame.draw.line(self.shadow_surf, ([min(i // 4 + 50, 70) for _ in range(3)]), (0, i * 4),
                              (self.list_rect.width, i * 4), 4)
 
+        self.list_status_text = Text("No networks available", self.list_rect.centerx, 200, WHITE, 15, font=retro_font, centered=True)
+
     def _get_networks(self):
         """generate wifi UI blocks based on available networks"""
-        self.available_networks = self.scan_networks()
         # self.available_networks = [{"ssid":f"HELLO{i}", "strength":20 * i} for i in range(5)]
         self.available_networks = sorted(self.available_networks, key=lambda x: x["strength"], reverse=True)
 
@@ -288,6 +299,11 @@ class NetworkManager:
         # wifi UI manager for the list
         self.wifi_um = UiManager(self.wifi_ui_group)
         self.wifi_um.active = False
+
+        if len(self.available_networks) == 0:
+            self.list_status_text.set_text("No networks available")
+        else:
+            self.list_status_text.set_text(" ")
 
     def setup_wifi_list_ui(self, images):
         """set up and arrange UI for wifi-list room"""
@@ -358,6 +374,10 @@ class NetworkManager:
         self.wifi_name_text.set_text(f"Wifi Name: " + str(self.ssid))
         self.status_text.set_text(f"Status: {self.status}")
 
+        if self.is_scanning and not self.wifi_list_thread.is_alive():
+            self._get_networks()
+            self.is_scanning = False
+
         current_status = None
         if current_status is not None:
             self.signal_text.set_text(f"Signal Strength: {current_status if self.wifi_connected else None}")
@@ -399,6 +419,7 @@ class NetworkManager:
         self.wifi_um.draw(self.list_image)
         self.misc_um.draw(display)
         display.blit(self.list_image, self.list_rect)
+        self.list_status_text.draw(display)
 
     def quit(self):
         """stop threads"""

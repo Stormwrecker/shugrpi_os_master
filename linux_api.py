@@ -63,6 +63,10 @@ class Linux:
                     "in_use": (in_use_flag.strip() == "*"),
                     "security": security if security else "Open"
                 })
+            self.logger.info(f"Wifi scan picked up the following:\n{networks}")
+
+        else:
+            self.logger.error("Cannot scan for wifi networks on non-SHUGRPi device")
 
         return networks
 
@@ -118,6 +122,7 @@ class Linux:
 
     def disconnect_wifi(self, forget=True):
         if not self.is_shugrpi:
+            self.logger.error("Cannot disconnect wifi on non-SHUGRPi device")
             return -1
 
         con_name = "shugrpi-wifi"
@@ -150,9 +155,11 @@ class Linux:
 
     def check_internet_status(self):
         _, _, out = self._run(["nmcli", "networking", "connectivity", "check"])
-        connectivity = out.strip()
-
-        return connectivity == "full"
+        if self.is_shugrpi:
+            connectivity = out.strip()
+            return connectivity == "full"
+        else:
+            return False
 
     """git commands"""
     def git_clone(self, repo="https://github.com/Stormwrecker/shugrpi_os_master.git"):
