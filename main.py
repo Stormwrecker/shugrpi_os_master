@@ -54,31 +54,31 @@ from shutil import copy, rmtree
 
 # initialize pygame with necessary setups
 def init_pygame():
-    os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
     pygame.init()
     logger.info("Initialized pygame-ce")
-    active_driver = "dummy"
+    active_driver = None
 
     # setup audio
     try:
-        pygame.mixer.init()
         active_driver = pygame.mixer.get_driver()
         logger.info(f"Using audio driver: {active_driver}")
-        os.environ["SDL_AUDIODRIVER"] = active_driver
+        pygame.mixer.quit()
+        os.environ.setdefault("SDL_AUDIODRIVER", active_driver)
+        pygame.mixer.init()
         return active_driver
 
     except Exception as e:
-        drivers = ["wasapi", "alsa", "dummy"]
+        drivers = ["wasapi", "alsa"]
         for driver in drivers:
             try:
-                os.environ["SDL_AUDIODRIVER"] = active_driver
                 pygame.mixer.quit()
+                os.environ.setdefault("SDL_AUDIODRIVER", driver)
                 pygame.mixer.init()
                 active_driver = driver
-                logger.info(f"Trying audio driver: {active_driver}")
                 break
             except Exception as e:
                 active_driver = "dummy"
+                os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
                 logger.error(f"Driver not available: {driver}")
 
     if active_driver:
@@ -567,7 +567,7 @@ class Game(pygame.sprite.Sprite):
         self.last_played = configs["last_played"]
 
         self.executable = configs["executable"]
-        self.exec_type = self.executable.split(".")[1]
+        self.exec_type = os.path.splitext(self.executable)[1].lstrip(".")
 
         self.use_venv = configs.get("use_venv")
         self.python_version = configs.get("python_version")
@@ -680,6 +680,13 @@ class Game(pygame.sprite.Sprite):
         if self.exec_type == "py":
             processes = [self.python_exec, self.executable]
             return processes, self.root_path, os.environ.copy()
+        elif self.exec_type == "bin":
+            logger.info(f"Making '{self.name}' executable...")
+            try:
+                subprocess.run(["chmod", "+x", self.executable])
+            except:
+                logger.error(f"'{self.name}' cannot be made executable")
+            return self.executable, self.root_path, os.environ.copy()
         else:
             return self.executable, self.root_path, os.environ.copy()
 
@@ -711,6 +718,7 @@ class GameManager:
         self.log_data = []
 
     def _setup_placeholder(self, path):
+        global logger
         logger.warning(f"Valid game directory does not exist in {path}")
 
         os.makedirs(os.path.join(path, "placeholder"))
@@ -730,6 +738,12 @@ class GameManager:
 
         # get all directories
         all_dirs = [d for d in os.listdir(path) if os.path.isdir(os.path.join(path, d))]
+        if len(all_dirs) >= 2:
+            placeholder = os.path.join(path, "placeholder")
+            if os.path.exists(placeholder):
+                rmtree(placeholder)
+                logger.info("Removed placeholder (no longer needed)")
+
         if len(all_dirs) <= 0:
             self._setup_placeholder(path)
             all_dirs = [d for d in os.listdir(path) if os.path.isdir(os.path.join(path, d))]
@@ -1143,22 +1157,23 @@ class GameWheelUi(UiElement):
 
 # main SHUGRPi OS app
 class ShugrPiOS:
-    def __init__(self, is_shugrpi, linux, master_images):
+    def __init__(self, is_shugrpi, linux, master_images, logger):
         """ Master class for the SHUGRPi Operating System """
         self.is_shugrpi = is_shugrpi
         self.linux = linux
+        self.logger = logger
 
         # window/display setup
         self.screen = screen
         self.display = pygame.Surface((DISPLAY_WIDTH, DISPLAY_HEIGHT)).convert()
         self.display_info = pygame.display.Info()
-        logger.info("Using video driver: " + pygame.display.get_driver())
+        self.logger.info("Using video driver: " + pygame.display.get_driver())
 
         # manager setup
-        self.cm = ClockManager(self.linux, dm, logger)
-        self.am = AudioManager(logger, self.is_shugrpi)
+        self.cm = ClockManager(self.linux, dm, self.logger)
+        self.am = AudioManager(self.logger, self.is_shugrpi)
         self.gm = GameManager(dm)
-        self.nm = NetworkManager(self.linux, dm, logger, master_images)
+        self.nm = NetworkManager(self.linux, dm, self.logger, master_images)
 
         # time setup
         self.clock = pygame.time.Clock()
@@ -1253,14 +1268,14 @@ class ShugrPiOS:
         # framerate counter (not permanent)
         self.fps_text = Text(60, 10, DISPLAY_HEIGHT - 20, WHITE, 10, retro_font)
 
-        logger.info("Initialized SHUGRPi Operating System")
+        self.logger.info("Initialized SHUGRPi Operating System")
 
     """ room ui setup """
     def setup_game_room(self):
         """setup and arrange UI for game room"""
         ui_group = pygame.sprite.Group()
 
-        if dm.data["num_games"] != len(os.listdir(self.master_games_path)):
+        if dm.data["num_games"] != len(os.listdir(self.master_games_path)) or len(os.listdir(self.master_games_path)) == 0:
             all_games_data = self.gm.load_games(self.master_games_path)
         else:
             all_games_data = dm.data["loaded_games"]
@@ -1388,7 +1403,7 @@ class ShugrPiOS:
         except (Exception, KeyboardInterrupt) as e:
             if isinstance(e, Exception):
                 error_msg = f"SHUGRPi has crashed due to the following error: {e}"
-                logger.error(error_msg)
+                self.logger.error(error_msg)
                 pygame.display.message_box(window_title, error_msg, "error")
                 raise
                 self.pre_shutdown(1)
@@ -1421,7 +1436,7 @@ class ShugrPiOS:
                     if self.logo_alpha == 0:
                         self.switch_phase(0, dt, True)
                         self.logo_alpha = 0
-                        logger.info("Running main loop")
+                        self.logger.info("Running main loop")
 
         # main menu
         elif self.master_phase == 0:
@@ -1666,16 +1681,18 @@ class ShugrPiOS:
 
     def execute_game(self):
         proc, path, env = self.game_wheel.prepare_game()
-        if audio_driver != "dummy":
-            pygame.mixer.pause()
         self.running_game[0] = self.game_wheel.lowest_game.name
 
         try:
+            if audio_driver != "dummy":
+                pygame.mixer.quit()
             self.running_game[1] = subprocess.Popen(proc, cwd=path, env=env, stderr=subprocess.PIPE, text=True)
             self.start_game = False
             self.pause = True
         except Exception as e:
-            logger.error(f"Failed to launch {self.running_game[0]}: {e}")
+            if audio_driver != "dummy":
+                pygame.mixer.init()
+            self.logger.error(f"Failed to launch {self.running_game[0]}: {e}")
             self.notification.reset(f"Failed to launch: {e}", True)
             self.resume_menu()
 
@@ -1697,20 +1714,21 @@ class ShugrPiOS:
             self.notification.reset(f"`{title}` crashed due to: `{simple_error}`")
 
         if is_error:
-            logger.error(f"`{self.game_wheel.lowest_game.name}` has crashed due to the following error:\n" + stderr.strip())
+            self.logger.error(f"`{self.game_wheel.lowest_game.name}` has crashed due to the following error:\n" + stderr.strip())
 
         else:
-            logger.info(f"`{self.game_wheel.lowest_game.name}` has terminated successfully")
+            self.logger.info(f"`{self.game_wheel.lowest_game.name}` has terminated successfully")
 
     def resume_menu(self):
         self.running_game = [None, None]
         self.pause = False
 
+        if audio_driver != "dummy":
+            pygame.mixer.init()
+
         self.curtain.fade_to(0)
         self.game_wheel.selected[0] = True
 
-        if audio_driver != "dummy":
-            pygame.mixer.unpause()
         self.am.play_music("shugrpi_bg")
         self.game_menu.toggled = True
         self.game_menu.toggle()
@@ -1722,7 +1740,7 @@ class ShugrPiOS:
         current_game = self.game_wheel.lowest_game
         if current_game.name not in self.installations:
             current_game.update_before_install()
-            self.installations[current_game.name] = Installation(current_game, logger, self.nm.internet_access)
+            self.installations[current_game.name] = Installation(current_game, self.logger, self.nm.internet_access)
             self.installations[current_game.name].start()
             self.game_menu.update_start_game_ui(2)
 
@@ -1763,7 +1781,7 @@ class ShugrPiOS:
 
                 self.clock.tick(FPS)
 
-                logger.info(f"Uninstalled `{current_game.name}`")
+                self.logger.info(f"Uninstalled `{current_game.name}`")
 
             else:
                 if current_game.use_venv:
@@ -1776,7 +1794,7 @@ class ShugrPiOS:
         if os.path.exists(current_game.root_path):
             rmtree(current_game.root_path)
             self.notification.reset(f"{current_game.name} has been removed from device")
-            logger.info(f"Removed `{current_game.name}` from device")
+            self.logger.info(f"Removed `{current_game.name}` from device")
 
             self.gm = GameManager(dm)
             all_games_data = self.gm.load_games(self.master_games_path)
@@ -1844,7 +1862,7 @@ class ShugrPiOS:
         # connect wifi
         if self.dialog_menu.dialog_type == 3:
             if self.dialog_menu.choice == 1:
-                self.nm.connect_wifi(str(self.nm.wifi_um), self.dialog_menu.text_field.value)
+                self.nm.connect_wifi(self.nm.wifi_um.get_ui(self.nm.wifi_um.x_index, self.nm.wifi_um.y_index).ssid, self.dialog_menu.text_field.value)
 
     def _dump_log(self):
         temp_log_file = os.path.join(base_path, "logs", "temp_session.log")
@@ -1883,7 +1901,7 @@ class ShugrPiOS:
                 self.game_menu.toggle()
                 self.game_wheel.selected = [True, False]
 
-                logger.info("Shutting down...")
+                self.logger.info("Shutting down...")
 
                 self.will_shutdown = True
 
@@ -1910,7 +1928,7 @@ class ShugrPiOS:
         dm.save()
 
         # final exit
-        logger.info("Shutdown complete!")
+        self.logger.info("Shutdown complete!")
         self._dump_log()
         if not system_shutdown:
             sys.exit(code)
@@ -1919,5 +1937,5 @@ class ShugrPiOS:
 
 
 # start up SHUGRPi OS
-shugrpi_os = ShugrPiOS(is_shugrpi, linux, master_images)
+shugrpi_os = ShugrPiOS(is_shugrpi, linux, master_images, logger)
 shugrpi_os.run()

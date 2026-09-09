@@ -43,6 +43,9 @@ def quit_logger():
     logging.shutdown()
 
 
+logger = init_logger()
+
+
 """ Device Managers """
 
 # compatibility management
@@ -69,7 +72,7 @@ class CompatibilityManager:
     def _update_env(self):
         if self.is_shugrpi:
             os.environ["DISPLAY"] = ":0"
-            os.environ['AUDIODEV'] = 'hdmi:CARD=vc4hdmi0,DEV=0'
+            # os.environ['AUDIODEV'] = 'hdmi:CARD=vc4hdmi0,DEV=0'
             os.environ["SDL_VIDEO_ALLOW_SCREENSAVER"] = "0"
         os.environ["PYGAME_HIDE_SUPPORT_PROMPT"] = "0"
 
@@ -253,7 +256,7 @@ class NetworkManager:
         self.main_header_text = Text("Network Settings", HALF_DISPLAY_WIDTH, 85, WHITE, 25, default_font, centered=True)
 
         self.wifi_header_text = Text("Network Status", 190, first_col_y - 50, WHITE, 15, default_font, True)
-        self.wifi_name_text = Text(f"Wifi Name: {self.ssid}", first_col_x, first_col_y, WHITE, 11, default_font, False)
+        self.wifi_name_text = Text(f"{self.ssid}", first_col_x, first_col_y, WHITE, 11, default_font, False)
         self.status_text = Text(f"Status: {self.status}", first_col_x, first_col_y + 50, WHITE, 11, default_font, False)
         self.signal_text = Text("Signal Strength: None", first_col_x, first_col_y + 100, WHITE, 11, default_font, False)
 
@@ -371,7 +374,7 @@ class NetworkManager:
 
     def update(self, dt):
         """update statuses for network connection and update UI"""
-        self.wifi_name_text.set_text(f"Wifi Name: " + str(self.ssid))
+        self.wifi_name_text.set_text(str(self.ssid))
         self.status_text.set_text(f"Status: {self.status}")
 
         if self.is_scanning and not self.wifi_list_thread.is_alive():
