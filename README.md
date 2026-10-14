@@ -8,15 +8,24 @@ The **S**tormwrecker **H**andheld **U**nleashed **G**aming **R**aspberry **Pi** 
 This is described in more detail in the Official Guide in the `/docs` folder, but essentially, the OS I'm using is based off of Debian-12 Bookworm for Raspberry Pi. I tweaked the actual startup process to be utterly silent and launch directly into `main.py` running from an umbrella Openbox session. Inside of this Pygame-based "operating system", I have UI elements that individually store their own backend functions. Each backend function is a Python wrapper for Linux calls via subprocess, so yes: This code can be *partially* considered a true operating system, what with managing files, timezones, game installations, updates, etc.
 
 ## So how does it work *non-technically*?
-This custom operating system is basically just a bunch of UI slapped together to navigate/play your games and configure basic settings.
+This custom OS is basically just a bunch of UI slapped together to navigate/play your games and configure basic settings.
 
-# Main Menu
+
+## Screenshots
+
+### Main Menu
 <img width="797" height="479" alt="image" src="https://github.com/user-attachments/assets/5773d2e6-a5dd-47cb-af3c-83c0fe65f2a1" />
+
+### Launching a Game
+<img width="800" height="479" alt="image" src="https://github.com/user-attachments/assets/7c79d875-103f-48dd-a5be-50af23db1703" />
+
+### Installing a Game
+<img width="800" height="479" alt="image" src="https://github.com/user-attachments/assets/54589540-6326-4feb-8213-3b048cc1a761" />
 
 Pretty simple stuff...
 
-## Notes:
-While the OS is designed on a Windows machine, there are certain functionalities that will **not** do anything if running on a non-Pi device. The variable `is_shugr_pi` detects if running on an `aarch64` machine (regardless of using Linux or not) and is used for when wanting to run certain commands (e.g. git commands, python commands). There are all sorts of features the SHUGRPi is capable of, such as detecting updates, setting the Pi's clock, configuring network connections, and powering off the system.
+## Compatibility
+The OS source code is written on a Windows machine and can be run on such. However, all of the Linux calls will be disabled and running `.bin` files won't work either. To be fully able to use everything, follow the instructions mentioned earlier in the README and run this stuff on a Raspberry Pi 5. I do implement delta-time in the source code, so you can get away with a Pi 4 without sacrificing too much of your SHUGRPi experience, but your games will definitely get affected.
 
 ## Is RetroPie used for the SHUGRPi?
 No. The SHUGRPi OS is independent from RetroPie and any other emulation OS, and although no emulation is involved, SHUGRPi OS is a comparable piece of software. It was originally meant to run Pygame apps, but with the way it works, it can run other apps as well (not tested). If your goal is to play old retro games, you can either a) use RetroPie instead or b) make retro games in Pygame. 🙂
