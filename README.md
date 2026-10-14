@@ -2,18 +2,18 @@
 The README will get brought up-to-speed when first release is finished.
 
 # What is a SHUGRPi?
-The **S**tormwrecker **H**andheld **U**nleashed **G**aming **R**aspberry **Pi** (or SHUGRPi for short) is a handheld gaming console that runs off of Pygame and runs Pygame games. It uses a Raspberry Pi 5 for computing.
+The **S**tormwrecker **H**andheld **U**nleashed **G**aming **R**aspberry **Pi** (or SHUGRPi for short) is a custom handheld gaming console that runs a Pygame-based operating system (i.e. the code in this repo) which, in turn, can launch games, mainly ones built with Pygame. I have, however, broadened support for launching virtually any Linux ARM64 binaries, but it's running raw Python/Pygame that makes this console stand out from the mainline ones. I am currently prototyping on a Raspberry Pi 5 (4GB RAM with an 8GB microSD for storage), but the final plan is to build a custom motherboard based off of the Raspberry Compute Module 5 with custom housing and the works.
 
 ## How does it work technically?
-The custom launcher `main.py` runs alongside Openbox (a lightweight window manager) on boot-up via `startx`. From there, you can run your games. If the launcher fails or quits, it simply restarts after a second or two.
+This is described in more detail in the Official Guide in the `/docs` folder, but essentially, the OS I'm using is based off of Debian-12 Bookworm for Raspberry Pi. I tweaked the actual startup process to be utterly silent and launch directly into `main.py` running from an umbrella Openbox session. Inside of this Pygame-based "operating system", I have UI elements that individually store their own backend functions. Each backend function is a Python wrapper for Linux calls via subprocess, so yes: This code can be *partially* considered a true operating system, what with managing files, timezones, game installations, updates, etc.
 
-## How does it work non-technically?
-The custom "OS" basically is a bunch of UI put together to navigate through your games and basic settings:
+## So how does it work *non-technically*?
+This custom operating system is basically just a bunch of UI slapped together to navigate/play your games and configure basic settings.
 
+# Main Menu
 <img width="797" height="479" alt="image" src="https://github.com/user-attachments/assets/5773d2e6-a5dd-47cb-af3c-83c0fe65f2a1" />
 
-
-Pretty simple stuff.
+Pretty simple stuff...
 
 ## Notes:
 While the OS is designed on a Windows machine, there are certain functionalities that will **not** do anything if running on a non-Pi device. The variable `is_shugr_pi` detects if running on an `aarch64` machine (regardless of using Linux or not) and is used for when wanting to run certain commands (e.g. git commands, python commands). There are all sorts of features the SHUGRPi is capable of, such as detecting updates, setting the Pi's clock, configuring network connections, and powering off the system.
