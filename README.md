@@ -28,7 +28,7 @@ Pretty simple stuff...
 The OS source code is written on a Windows machine and can be run on such. However, all of the Linux calls will be disabled and running `.bin` files won't work either. To be fully able to use everything, follow the instructions mentioned earlier in the README and run this stuff on a Raspberry Pi 5. I do implement delta-time in the source code, so you can get away with a Pi 4 without sacrificing too much of your SHUGRPi experience, but your games will definitely get affected.
 
 ## Is RetroPie used for the SHUGRPi?
-No. The SHUGRPi OS is independent from RetroPie and any other emulation OS, and although no emulation is involved, SHUGRPi OS is a comparable piece of software. It was originally meant to run Pygame apps, but with the way it works, it can run other apps as well (not tested). If your goal is to play old retro games, you can either a) use RetroPie instead or b) make retro games in Pygame. 🙂
+No. The SHUGRPi OS is independent from RetroPie and any other emulation OS, and although no emulation is involved, SHUGRPi OS is a comparable piece of software. If your goal is to play old retro games, you can either a) use RetroPie instead or b) make retro games in Pygame. 🙂
 
 ## How to Build
 In the `/docs` folder, I have included a pdf that runs through how to build the SHUGRPi from source. I plan on having a pre-made disk image that you can use to flash the Pi with, but for now, the pdf will have to do. Explanations are a bit scarce in the instructions, so if you run into issues, please report them in the Issues page.
